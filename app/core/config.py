@@ -27,6 +27,11 @@ class Config(BaseSettings):
     signal_block_ms: int = Field(1000, validation_alias="SIGNAL_BLOCK_MS")
     signal_cap: int = Field(1024, validation_alias="SIGNAL_CAP")
 
+    # distribution / cluster membership
+    heartbeat_interval_ms: int = Field(3000, validation_alias="HEARTBEAT_INTERVAL_MS")
+    heartbeat_ttl_ms: int = Field(10000, validation_alias="HEARTBEAT_TTL_MS")
+    dead_node_grace_ms: int = Field(30000, validation_alias="DEAD_NODE_GRACE_MS")
+
     # duration helpers (seconds)
     @property
     def visibility_timeout(self) -> float:
@@ -43,6 +48,19 @@ class Config(BaseSettings):
     @property
     def signal_block(self) -> float:
         return self.signal_block_ms / 1000
+    
+    @property
+    def heartbeat_interval(self) -> float:
+        return self.heartbeat_interval_ms / 1000
+
+    @property
+    def heartbeat_ttl(self) -> float:
+        return self.heartbeat_ttl_ms / 1000
+
+    @property
+    def node_grace_window(self) -> float:
+        return self.dead_node_grace_ms / 1000
+
 
 
     # Validation
@@ -66,6 +84,15 @@ class Config(BaseSettings):
             raise ValueError("config: SIGNAL_BLOCK_MS must be > 0")
         if self.signal_cap <= 0:
             raise ValueError(f"config: SIGNAL_CAP must be > 0, got {self.signal_cap}")
+        if self.heartbeat_interval_ms <= 0:
+            raise ValueError("config: HEARTBEAT_INTERVAL_MS must be > 0")
+        if self.heartbeat_ttl_ms <= self.heartbeat_interval_ms:
+            raise ValueError(
+                f"config: HEARTBEAT_TTL_MS ({self.heartbeat_ttl_ms}) must exceed "
+                f"HEARTBEAT_INTERVAL_MS ({self.heartbeat_interval_ms}) to tolerate a missed beat"
+            )
+        if self.dead_node_grace_ms <= 0:
+            raise ValueError("config: DEAD_NODE_GRACE_MS must be > 0")
         return self
 
 
