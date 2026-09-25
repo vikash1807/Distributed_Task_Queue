@@ -8,8 +8,20 @@ import redis.asyncio as redis
 
 from app.core.config import Config
 from app.queue import PriorityQueue, DelayedScheduler
-from app.service import TaskService, MetricService, EventService
-from app.store import TaskStore, DeadLetterStore, MetricStore, EventStore
+from app.service import(
+    TaskService,
+    MetricService,
+    EventService,
+    WorkerNodeService,
+)
+from app.store import (
+    TaskStore,
+    DeadLetterStore,
+    MetricStore,
+    EventStore,
+    NodeStore,
+    WorkerStateStore,
+)
 
 
 @dataclass
@@ -20,16 +32,21 @@ class AppContainer:
     dead_letter: DeadLetterStore
     event_store: EventStore
     metric_store: MetricStore
+    node_store: NodeStore
+    worker_state_store: WorkerStateStore
     task_store: TaskStore
     event_service: EventService
     metric_service: MetricService
     task_service: TaskService
+    worker_node_service: WorkerNodeService
 
 
 def build_container(client: redis.Redis, config: Config) -> AppContainer:
     event_store = EventStore(client)
     metric_store = MetricStore(client)
+    node_store = NodeStore(client, config.heartbeat_ttl_ms)
     task_store = TaskStore(client)
+    worker_state_store = WorkerStateStore(client)
 
     task_queue = PriorityQueue(client, task_store)
     delayed_scheduler = DelayedScheduler(
@@ -54,6 +71,10 @@ def build_container(client: redis.Redis, config: Config) -> AppContainer:
         task_queue=task_queue,
         metric_store=metric_store
     )
+    worker_node_service = WorkerNodeService(
+        worker_state=worker_state_store,
+        node_store=node_store
+    )
 
     return AppContainer(
         redis=client,
@@ -62,8 +83,11 @@ def build_container(client: redis.Redis, config: Config) -> AppContainer:
         dead_letter=dead_letter,
         event_store=event_store,
         metric_store=metric_store,
+        node_store=node_store,
         task_store=task_store,
+        worker_state_store=worker_state_store,
         event_service=event_service,
         metric_service=metric_service,
         task_service=task_service,
+        worker_node_service=worker_node_service,
     )
