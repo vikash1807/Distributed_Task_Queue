@@ -9,9 +9,18 @@ from app.broker import RedisBroker
 from app.core.config import load_config
 from app.core.logging import setup_logging
 from app.handler import create_registry
-from app.queue import PriorityQueue, DelayedScheduler
-from app.store import new_redis, TaskStore, DeadLetterStore, MetricStore, EventStore, WorkerStateStore
-from app.worker import Executor, ExecutorDeps, Pool
+from app.queue import DelayedScheduler, PriorityQueue
+from app.store import (
+    DeadLetterStore,
+    EventStore,
+    MetricStore,
+    NodeStore,
+    TaskStore,
+    WorkerStateStore,
+    new_redis,
+)
+from app.worker import Executor, ExecutorDeps, Node, NodeConfig, Pool
+from app.worker.node import create_node_id, get_hostname
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -41,6 +50,7 @@ async def run() -> None:
         event_store = EventStore(redis)
         task_store = TaskStore(redis)
         metric_store = MetricStore(redis)
+        node_store = NodeStore(redis, config.heartbeat_ttl_ms)
         worker_state = WorkerStateStore(redis)
 
         task_queue = PriorityQueue(redis, task_store)
@@ -51,14 +61,18 @@ async def run() -> None:
             event_store=event_store,
             task_store=task_store,
         )
+
         dead_letter = DeadLetterStore(redis)
+
+        # One node ID represents this worker process.
+        node_id = create_node_id()
 
         redis_broker = RedisBroker(
             client=redis,
             task_store=task_store,
             queue_ready=task_queue,
             visibility_timeout=config.visibility_timeout,
-            node_id="1" # This field is temporary.
+            node_id=node_id
         )
 
         executor = Executor(
@@ -83,24 +97,34 @@ async def run() -> None:
             worker_state=worker_state,
         )
 
-        try:
-            await pool.start()
+        node = Node(
+            node_config=NodeConfig(
+                node_store=node_store,
+                node_id=node_id,
+                hostname=get_hostname(),
+                role="worker",
+                capacity=config.worker_count,
+                heartbeat_interval=config.heartbeat_interval,
+            ),
+            event_store=event_store,
+            pool=pool,
+        )
 
-            logger.info("worker process started workers=%s", config.worker_count)
-            # Keep the process alive until it receives SIGINT/SIGTERM.
-            await asyncio.Event().wait()
+        # Application-level shutdown signal.
+        stop = asyncio.Event()
+
+        try:
+            await node.run(stop)
 
         except asyncio.CancelledError:
-            # Propagate cancellation after cleanup in finally blocks.
             logger.info("worker process cancellation requested")
+            stop.set()
             raise
+
         except Exception:
             logger.exception("worker process failed")
             raise
 
-        finally:
-            await pool.stop()
-        
     finally:
         await redis.aclose()
         logger.info("redis connection closed")

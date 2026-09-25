@@ -137,7 +137,7 @@ class Node(BaseModel):
     hostname: str = ""
     role: str = ""
     capacity: int = 0 # No. of executor tasks
-    started_at = datetime | None = None
+    started_at: datetime | None = None
     alive: bool = False
     in_flight_tasks: int = 0
 

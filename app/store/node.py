@@ -7,7 +7,7 @@ import json
 import redis.asyncio as redis
 
 from app.model import Node
-from app.store import (
+from app.store.redis import (
     KEY_NODES,
     node_dead_key,
     node_heartbeat_key,
@@ -93,7 +93,7 @@ class NodeStore:
         Dead nodes (hearbeat expired but still in the registry) are included
         with alive=false.
         """
-        ids = self.get_registered_ids()
+        ids = await self.get_registered_ids()
 
         if not ids:
             return []
