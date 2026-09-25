@@ -48,6 +48,8 @@ def node_dead_key(node_id: str) -> str:
     return f"taskqueue:node:{node_id}:dead"
 
 
+POOL_HEADROOM = 10 
+
 def new_redis(
     addr: str,
     password: str,
@@ -58,12 +60,17 @@ def new_redis(
     if not host:  # addr had no ':' — treat the whole thing as the host
         host, port = addr, "6379"
 
+    # Each idle worker holds a connection for upto `SIGNAL_BLOCK` while blocked
+    # on the doorbell BLPOP, so the pool must leave the room for heartbeat,
+    # delayed scheduler and claims etc.
+    connection_count = worker_count + POOL_HEADROOM
+
     return redis.Redis(
         host=host or "localhost",
         port=int(port or "6379"),
         password=password or None,
         db=0,
-        max_connections=worker_count, # + POOL_HEADROOM,
+        max_connections=connection_count,
         decode_responses=True,
     )
 
