@@ -22,11 +22,11 @@ class WorkerStateStore:
     async def get_all(self) -> list[WorkerState]:
         """Returns all worker states."""
 
-        values = await self.client.hgetall(KEY_WORKERS)
+        data = await self.client.hgetall(KEY_WORKERS)
 
         states : list[WorkerState] = []
 
-        for value in values:
+        for value in data.values():
             try:
                 states.append(
                     WorkerState.model_validate_json(value)

@@ -128,3 +128,22 @@ class WorkerState(BaseModel):
     def from_json_dict(cls, d: dict[str, Any]) -> WorkerState:
         return cls.model_validate(d)
 
+
+# Node is a standalone worker process that joins the cluster. Identity is
+# {hostname}-{shortuuid}. Presence is tracked by a heartbeat TTL key; liveness
+# is derived from whether that key still exists.
+class Node(BaseModel):
+    id: str = ""
+    hostname: str = ""
+    role: str = ""
+    capacity: int = 0 # No. of executor tasks
+    started_at: datetime | None = None
+    alive: bool = False
+    in_flight_tasks: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump(mode="json")
+    
+    @classmethod
+    def from_json_dict(cls, d: dict[str, Any]) -> Node:
+        return cls.model_validate(d)

@@ -18,7 +18,6 @@ KEY_EVENTS_CLUSTER = "taskqueue:events:cluster"  # LIST of lifecycle-only events
 KEY_WORKERS = "taskqueue:workers"  # HASH of legacy per-executor worker state
 KEY_NODES = "taskqueue:nodes"  # SET of known node IDs
 
-
 # Task records live under this prefix : taskqueue:task:{id} (HASH)
 KEY_TASK_PREFIX = "taskqueue:task:"
 
@@ -32,6 +31,24 @@ def node_tasks_key(node_id: str) -> str:
     """SET key holding the task IDs a node currently leases."""
     return f"taskqueue:node:{node_id}:tasks"
 
+def node_heartbeat_key(node_id: str) -> str:
+    """TTL key - signals whether a node is alive or not."""
+    return f"taskqueue:node:{node_id}:hb"
+
+def node_meta_key(node_id: str) -> str:
+    """
+    Non-TTL key holding a node's descriptive json. it outlives the heartbeat
+    key so a dead node still resolves its hostname capacity until reaper 
+    prunes it.
+    """
+    return f"taskqueue:node:{node_id}:meta"
+
+def node_dead_key(node_id: str) -> str:
+    """Tombstone key (SET NX) written when the reaper first sees a node dead."""
+    return f"taskqueue:node:{node_id}:dead"
+
+
+POOL_HEADROOM = 10 
 
 def new_redis(
     addr: str,
@@ -43,12 +60,17 @@ def new_redis(
     if not host:  # addr had no ':' — treat the whole thing as the host
         host, port = addr, "6379"
 
+    # Each idle worker holds a connection for upto `SIGNAL_BLOCK` while blocked
+    # on the doorbell BLPOP, so the pool must leave the room for heartbeat,
+    # delayed scheduler and claims etc.
+    connection_count = worker_count + POOL_HEADROOM
+
     return redis.Redis(
         host=host or "localhost",
         port=int(port or "6379"),
         password=password or None,
         db=0,
-        max_connections=worker_count, # + POOL_HEADROOM,
+        max_connections=connection_count,
         decode_responses=True,
     )
 
