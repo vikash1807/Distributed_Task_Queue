@@ -80,7 +80,7 @@ class TaskService:
             id=f"evt-{secrets.token_hex(12)}",
             task_id=task_id,
             type=TaskEventType.SUBMITTED,
-            worker_id=-1,
+            worker_id="-1",
             detail=f"Priority={priority}, Delay={delay}s, MaxRetries={max_retries}",
             timestamp=utc_now()
         )
@@ -144,7 +144,7 @@ class TaskService:
                 id=f"evt-{secrets.token_hex(12)}",
                 task_id=task.id,
                 type=TaskEventType.REDRIVEN,
-                worker_id=-1,
+                worker_id="-1",
                 detail="Moved from dead-letter queue back to ready",
                 timestamp=utc_now()
             )

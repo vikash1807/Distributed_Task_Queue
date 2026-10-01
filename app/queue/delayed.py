@@ -93,7 +93,7 @@ class DelayedScheduler:
                             id=f"evt-{secrets.token_hex(12)}",
                             task_id="",
                             type=TaskEventType.PROMOTED,
-                            worker_id=-1,
+                            worker_id="-1",
                             detail=f"Promoted {promoted} task(s) from delayed to ready",
                             timestamp=datetime.now(timezone.utc)
                         )

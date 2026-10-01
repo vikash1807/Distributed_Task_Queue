@@ -85,7 +85,7 @@ class TaskEvent(BaseModel):
     id: str = ""
     task_id: str = ""
     type: TaskEventType | str = ""
-    worker_id: int = 0  # -1 for submit/scheduler/reaper (non-worker) events
+    worker_id: str  # "-1" for submit/scheduler/reaper (non-worker) events
     detail: str = ""
     timestamp: datetime | None = None
 
@@ -116,7 +116,7 @@ class EnhancedMetrics(Metrics):
 
 
 class WorkerState(BaseModel):
-    id: int = -1
+    id: str
     status: str = "" #idle, processing
     task_id: str = ""
     started_at: datetime | None = None

@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 pass
 
-        await redis.close()
+        await redis.aclose()
         logger.info("redis connection closed")
 
 
