@@ -36,11 +36,15 @@ class Pool:
         self._stop = asyncio.Event()
         self._workers: list[asyncio.Task] = []
     
-    async def start(self) -> None:
+    async def start(self, node_id: str) -> None:
         """Launch the worker tasks. They run until ``stop`` is called."""
         self._stop.clear()
 
-        for worker_id in range(self.worker_count):
+        for i in range(self.worker_count):
+
+            # Create unique worker ids
+            worker_id = f"{node_id}:{i+1}"
+            
             try:
                 await self.worker_state.set(
                     WorkerState(
@@ -55,9 +59,8 @@ class Pool:
                 asyncio.create_task(self._worker(worker_id))
             )
 
-
         logger.info(
-            "worker pool started count=%d",
+            "worker pool started workers=%d",
             self.worker_count,
         )
     
@@ -79,7 +82,7 @@ class Pool:
         ready queue again.
         """
 
-        logger.info("worker started worker=%d", worker_id)
+        logger.info("worker started worker=%s", worker_id)
 
         while not self._stop.is_set():
             try:
@@ -106,4 +109,4 @@ class Pool:
                 logger.exception("worker error worker_id=%d", worker_id)
                 await asyncio.sleep(self.poll_interval)
         
-        logger.info("worker stopped worker_id = %d", worker_id)
+        logger.info("worker stopped worker_id = %s", worker_id)

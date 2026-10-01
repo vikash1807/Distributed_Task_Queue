@@ -114,9 +114,11 @@ class Node:
         )
         
         try:
-            await self.pool.start()
+            await self.pool.start(self.node_cfg.node_id)
             logger.info(
-                "worker process started %s workers",
+                "node started node_id = %s, role = %s, capacity = %d",
+                self.node_cfg.node_id,
+                self.node_cfg.role,
                 self.node_cfg.capacity
             )
             # Keep the process alive until it receives SIGINT/SIGTERM.
@@ -173,7 +175,7 @@ class Node:
             id=f"evt-{secrets.token_hex(12)}",
             type=TaskEventType.NODE_JOINED,
             task_id="",
-            worker_id=-1,
+            worker_id="-1",
             detail=(
                 f"Node {self.node_cfg.node_id} joined \
                 (host={self.node_cfg.hostname}, \
