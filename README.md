@@ -1,293 +1,200 @@
-# Distributed_task_queue_system
+# Distributed Task Queue
 
-A Redis-backed distributed task queue built with Python, FastAPI, and asyncio.
+A small Redis-backed distributed task queue built with **Python, FastAPI, asyncio, and Redis**.
 
-The core building blocks of  distributed task queue:
+## What it supports
 
-* Task submission and persistence
-* Priority-based queues
-* Delayed task scheduling
-* Atomic Redis/Lua operations
-* Worker execution
-* Visibility timeouts and leases
-* Retries with backoff
-* Dead-letter queues
-* Task redrive
-* Metrics
-* Cluster membership and worker heartbeats
+* Task submission and persistent task state
+* Priority-based task queue
+* Delayed task execution
+* Async worker pool
+* Redis/Lua atomic operations
+* Visibility timeouts and task leases
+* Lease extension and ownership checks
+* Retries with exponential backoff
+* Dead-letter queue (DLQ)
+* Failed-task inspection and redrive
+* Task and cluster events
+* Processing and queue metrics
+* Worker/node state APIs
+* Node registration and TTL-based heartbeats
+* Automatic recovery of expired leases and dead worker nodes
+* Graceful worker shutdown
 
----
-
-## Current Architecture
-
-At a high level:
+## Architecture
 
 ```text
-                   ┌──────────────────┐
-                   │   FastAPI API     │
-                   │                  │
-                   │ Submit / Get     │
-                   │ Metrics / DLQ    │
-                   └────────┬─────────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │     Redis     │
-                    │               │
-                    │ Task Records  │
-                    │ Ready Queue   │
-                    │ Delayed Queue │
-                    │ Processing    │
-                    │ Dead Letter   │
-                    │ Metrics       │
-                    └───────┬───────┘
-                            │
-                 ┌──────────┴──────────┐
-                 ▼                     ▼
-          ┌──────────────┐      ┌──────────────┐
-          │   Worker 1   │      │   Worker 2   │
-          │              │      │              │
-          │ Executor     │      │ Executor     │
-          │ Pool         │      │ Pool         │
-          └──────────────┘      └──────────────┘
+                 FastAPI
+                    |
+          +---------+---------+
+          |                   |
+      Task / Metrics      Events / Nodes
+          |                   |
+          +---------+---------+
+                    |
+                  Redis
+                    |
+       +------------+------------+
+       |            |            |
+    Ready        Delayed      Processing
+    Queue         Queue          Leases
+       |                         |
+       +-----------+-------------+
+                   |
+              Worker Nodes
+           +-------+-------+
+           |               |
+        Executor        Executor
+           |               |
+           +-------+-------+
+                   |
+                Handlers
 ```
 
-Redis is the central coordination layer between API processes, workers, schedulers, and task state.
+Redis is the central coordination and state store. Lua scripts are used for operations where multiple Redis updates need to happen atomically.
 
----
+## Tech Stack
 
+* Python 3.14+
+* FastAPI
+* Redis
+* asyncio
+* Uvicorn
+* Pydantic Settings
+* httpx
+* uv
+* Ruff
 
-# Project Structure
+## Project Structure
 
 ```text
 app/
 ├── api/
-│   ├── dependencies.py
-│   ├── middleware.py
-│   ├── router.py
 │   ├── routes/
 │   │   ├── task.py
-│   │   └── metrics.py
-│   └── schema.py
-│
+│   │   ├── metrics.py
+│   │   ├── events.py
+│   │   └── worker_nodes.py
+│   ├── dependencies.py
+│   ├── middleware.py
+│   └── router.py
 ├── broker/
 │   ├── broker.py
 │   └── scripts/
-│       ├── ack.lua
-│       ├── dequeue.lua
-│       ├── extend.lua
-│       └── nack.lua
-│
 ├── core/
 │   ├── config.py
 │   └── logging.py
-│
 ├── handler/
 │   ├── builtins.py
 │   └── registry.py
-│
 ├── model/
-│   └── task.py
-│
 ├── queue/
 │   ├── queue.py
 │   ├── delayed.py
 │   └── scripts/
-│       ├── enqueue.lua
-│       ├── promote.lua
-│       └── retry.lua
-│
-├── run_worker.py
+├── reaper/
+│   ├── reaper.py
+│   └── scripts/
+├── service/
+├── store/
+├── worker/
+│   ├── executor.py
+│   ├── pool.py
+│   └── node.py
+├── container.py
 ├── main.py
-└── container.py
+└── run_worker.py
 ```
 
----
+## Getting Started
 
-## Tech Stack
-
-* **Python:** 3.14+
-* **FastAPI:** HTTP API
-* **Uvicorn:** ASGI server
-* **Redis:** queue, task state, leases, delayed scheduling, metrics
-* **asyncio:** asynchronous workers and scheduling
-* **httpx:** HTTP task handler
-* **Pydantic Settings:** configuration
-* **uv:** dependency and environment management
-
-Project dependencies are defined in `pyproject.toml`.
-
----
-
-# Getting Started
-
-## 1. Clone the repository
+### 1. Clone
 
 ```bash
-git clone https://github.com/vikash1807/Distributed_task_queue_system.git
-cd Distributed_task_queue_system
+git clone https://github.com/vikash1807/Distributed_Task_Queue.git
+cd Distributed_Task_Queue
 ```
 
-## 2. Install Python
+### 2. Install dependencies
 
-The project requires Python **3.14 or newer**.
-
-Check your version:
-
-```bash
-python --version
-```
-
-The repository also contains `.python-version` for the project Python version.
-
----
-
-## 3. Install uv
-
-Install `uv` if it is not already installed:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Verify:
-
-```bash
-uv --version
-```
-
----
-
-## 4. Install dependencies
+The project uses Python 3.14+ and `uv`.
 
 ```bash
 uv sync
 ```
 
-This creates/uses the project's virtual environment and installs the dependencies from `pyproject.toml` and `uv.lock`.
+If needed, install `uv`:
 
----
-
-# Redis Setup
-
-Redis is required for the application.
-
-The default configuration expects:
-
-```text
-localhost:6379
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Start Redis locally.
+### 3. Start Redis
 
-For example, using Docker:
+Redis is required.
+
+Using Docker:
 
 ```bash
 docker run --name taskqueue-redis -p 6379:6379 -d redis
 ```
 
-Verify the connection:
+Check it:
 
 ```bash
-docker exec -it taskqueue-redis redis-cli
-PING
+docker exec -it taskqueue-redis redis-cli ping
 ```
 
-Expected:
+Expected output:
 
 ```text
 PONG
 ```
 
----
+### 4. Configure environment
 
-# Configuration
+Copy the example configuration:
 
-Configuration is loaded from environment variables. Refer `.env.example`.
+```bash
+cp .env.example .env
+```
 
-The current defaults are:
+The default setup uses:
 
-| Variable                |          Default | Description                    |
-| ----------------------- | ---------------: | ------------------------------ |
-| `REDIS_ADDR`            | `localhost:6379` | Redis address                  |
-| `REDIS_PASSWORD`        |            empty | Redis password                 |
-| `SERVER_PORT`           |           `8080` | API server port                |
-| `METRICS_PORT`          |           `9100` | Metrics port                   |
-| `WORKER_COUNT`          |              `5` | Workers per worker process     |
-| `POLL_INTERVAL_MS`      |            `500` | Worker polling interval        |
-| `DRAIN_TIMEOUT_MS`      |           `5000` | Shutdown drain timeout         |
-| `VISIBILITY_TIMEOUT_MS` |          `30000` | Task lease/visibility timeout  |
-| `SIGNAL_BLOCK_MS`       |           `1000` | Redis signal blocking interval |
-| `SIGNAL_CAP`            |           `1024` | Signal capacity                |
+```text
+REDIS_ADDR=localhost:6379
+SERVER_PORT=8080
+WORKER_COUNT=5
+VISIBILITY_TIMEOUT_MS=30000
+```
 
-These defaults and validations are defined in `app/core/config.py`.
+The main configuration options are documented in `.env.example`.
 
-You can provide configuration through environment variables:
-`.env` file if preferred.
+## Run the Application
 
----
-
-# Running the Application
-
-The project has two main processes:
-
-1. API server
-2. Worker process
-
-## Start the API server
+Start the API:
 
 ```bash
 uv run python -m app.main
 ```
 
-The API listens on:
+The API is available at:
 
 ```text
 http://localhost:8080
 ```
 
-The API application initializes Redis and starts the delayed scheduler during its lifespan.
-
----
-
-## Start a worker
-
-In another terminal:
+Start a worker in another terminal:
 
 ```bash
 uv run python -m app.run_worker
 ```
 
-The worker process:
+You can start multiple worker processes to simulate multiple nodes in the cluster.
 
-1. Loads configuration.
-2. Connects to Redis.
-3. Builds the task store and queue.
-4. Starts the delayed scheduler.
-5. Creates the broker and executor.
-6. Starts the worker pool.
-7. Waits until shutdown.
-8. Gracefully stops the worker pool.
+## Example: Submit a Task
 
-You can run multiple worker processes to simulate a distributed cluster by increasing `worker_count` in enironment variables.
-
----
-
-# API
-
-Base URL:
-
-```text
-http://localhost:8080
-```
-
-## Submit a task
-
-```http
-POST /api/tasks
-```
-
-Example:
+### Sleep Task
 
 ```bash
 curl -X POST http://localhost:8080/api/tasks \
@@ -303,86 +210,27 @@ curl -X POST http://localhost:8080/api/tasks \
   }'
 ```
 
-The API returns the created task.
+### Delayed Task
 
----
-
-## Get a task
-
-```http
-GET /api/tasks/{task_id}
-```
-
-Example:
-
-```bash
-curl http://localhost:8080/api/tasks/<task_id>
-```
-
----
-
-## Get failed tasks
-
-```http
-GET /api/tasks/failed
-```
-
-Optional pagination:
-
-```bash
-curl "http://localhost:8080/api/tasks/failed?offset=0&limit=20"
-```
-
----
-
-## Redrive failed tasks
-
-```http
-GET /api/tasks/failed/redrive
-```
-
-This moves failed/dead-lettered tasks back into the normal processing flow.
-
----
-
-## Get metrics
-
-```http
-GET /api/metrics
-```
-
-Example:
-
-```bash
-curl http://localhost:8080/api/metrics
-```
-
-Enhanced metrics:
-
-```http
-GET /api/metrics/enhanced
-```
-
----
-
-# Built-in Task Handlers
-
-The current worker includes three built-in task types.
-
-## `sleep`
-
-Sleeps for a configurable duration.
+Set `delay` to the number of seconds before the task becomes ready:
 
 ```json
 {
   "type": "sleep",
   "payload": {
     "duration_ms": 800
-  }
+  },
+  "priority": 5,
+  "delay": 20,
+  "max_retries": 3
 }
 ```
 
-A `fail_rate` can also be provided for testing retries/failures:
+## Built-in Handlers
+
+### `sleep`
+
+Useful for testing worker execution and failures.
 
 ```json
 {
@@ -394,9 +242,7 @@ A `fail_rate` can also be provided for testing retries/failures:
 }
 ```
 
----
-
-## `http_fetch`
+### `http_fetch`
 
 Performs an HTTP GET request.
 
@@ -409,13 +255,9 @@ Performs an HTTP GET request.
 }
 ```
 
-The request uses a bounded HTTP timeout.
+### `hash`
 
----
-
-## `hash`
-
-Performs repeated SHA-256 hashing.
+Performs repeated SHA-256 hashing and can be used for CPU-heavy task testing.
 
 ```json
 {
@@ -427,319 +269,141 @@ Performs repeated SHA-256 hashing.
 }
 ```
 
-This is useful for testing CPU-heavy workloads.
+## API Endpoints
 
-The built-in handlers are implemented in `app/handler/builtins.py`.
-
----
-
-# Task Lifecycle
-
-A task generally moves through the following lifecycle:
+### Tasks
 
 ```text
-                submit
-                   │
-                   ▼
-              ┌─────────┐
-              │  Saved  │
-              └────┬────┘
-                   │
-                   ▼
-             ┌───────────┐
-             │   Ready   │
-             └─────┬─────┘
-                   │
-                   ▼
-             ┌───────────┐
-             │ Processing│
-             └─────┬─────┘
-                   │
-          ┌────────┴────────┐
-          │                 │
-       success            failure
-          │                 │
-          ▼                 ▼
-      completed          retry
-                            │
-                     ┌──────┴──────┐
-                     │             │
-                  retry        max retries
-                     │             │
-                     ▼             ▼
-                  ready        dead-letter
+POST /api/tasks
+GET  /api/tasks/{task_id}
+GET  /api/tasks/failed
+GET  /api/tasks/failed/redrive
 ```
 
-Delayed tasks additionally pass through the delayed queue before becoming ready.
-
----
-
-# Redis Data Model
-
-Redis is used for both task storage and queue coordination.
-
-Important structures include:
+### Metrics
 
 ```text
-taskqueue:task:{id}
-taskqueue:ready
-taskqueue:delayed
-taskqueue:processing
-taskqueue:deadletter
-```
-
-The exact Redis operations are intentionally implemented inside dedicated store/queue/broker components.
-
-Lua scripts are used where multiple Redis operations must happen atomically.
-
-Examples include:
-
-```text
-enqueue.lua
-promote.lua
-retry.lua
-dequeue.lua
-ack.lua
-nack.lua
-extend.lua
-```
-
-This prevents race conditions between multiple worker processes.
-
----
-
-# Delayed Tasks
-
-Tasks can be submitted with a delay:
-
-```json
-{
-  "type": "sleep",
-  "payload": {
-    "duration_ms": 500
-  },
-  "priority": 5,
-  "delay": 20,
-  "max_retries": 3
-}
-```
-
-The delayed scheduler monitors the delayed queue and promotes tasks to the ready queue when their scheduled time is reached.
-
-The scheduler runs in the API process and worker process where configured.
-
----
-
-# Retries
-
-Failed tasks can be retried according to their `max_retries` configuration.
-
-The retry flow uses Redis atomically to prevent inconsistent task state.
-
-Conceptually:
-
-```text
-Processing
-    │
-    │ failure
-    ▼
-Retry decision
-    │
-    ├── retries remaining ──► delayed/ready
-    │
-    └── retries exhausted ─► dead-letter
-```
-
-Retry delays use backoff to avoid immediately retrying a repeatedly failing task.
-
----
-
-# Visibility Timeout and Leases
-
-When a worker claims a task, the task receives a lease.
-
-The visibility timeout prevents a task from remaining permanently stuck if a worker disappears while processing it.
-
-Workers can extend the lease while required and acknowledge successful completion.
-
-The broker uses atomic Redis/Lua operations for:
-
-* dequeue/claim
-* acknowledge
-* negative acknowledgement
-* lease extension
-
-This is an important part of the distributed-worker safety model.
-
----
-
-# Dead-Letter Queue
-
-Tasks that exhaust their retry policy are moved to the dead-letter queue.
-
-Dead-lettered tasks can be inspected through:
-
-```http
-GET /api/tasks/failed
-```
-
-They can also be redriven:
-
-```http
-GET /api/tasks/failed/redrive
-```
-
-This allows failed work to be returned to the normal queue after the underlying problem has been addressed.
-
----
-
-# Metrics
-
-The system exposes task processing metrics through:
-
-```http
 GET /api/metrics
-```
-
-and:
-
-```http
 GET /api/metrics/enhanced
 ```
 
-Metrics are stored in Redis and updated as tasks move through different lifecycle states.
-
----
-
-
-# Useful Redis Commands
-
-Check Redis:
-
-```redis-cli
-ping
-```
-
-Inspect the ready queue:
-
-```redis-cli
-ZRANGE taskqueue:ready 0 -1 WITHSCORES
-```
-
-Inspect delayed tasks:
-
-```redis-cli
-ZRANGE taskqueue:delayed 0 -1 WITHSCORES
-```
-
-Inspect dead-letter tasks:
-
-```redis-cli
-ZRANGE taskqueue:deadletter 0 -1 WITHSCORES
-```
-
-Inspect a task record:
-
-```redis-cli
-HGETALL taskqueue:task:<task_id>
-```
-
-Inspect processing tasks:
-
-```redis-cli
-SMEMBERS taskqueue:processing
-```
-
----
-
-# Development Workflow
-
-The project is intentionally being built incrementally.
-
-Each development stage introduces another distributed-systems concept while keeping the implementation testable.
-
-Current development areas include:
+### Events
 
 ```text
-Task persistence
-      ↓
-Priority queue
-      ↓
-Atomic dequeue + leasing
-      ↓
-Worker execution
-      ↓
-Visibility timeout
-      ↓
-Retries + backoff
-      ↓
-Dead-letter queue
-      ↓
-Delayed scheduling
-      ↓
-Metrics
-      ↓
-Cluster membership + heartbeats
-      ↓
-Reaper / stale-node cleanup
+GET /api/events
+GET /api/events/cluster
 ```
 
-The next major step is cluster membership and worker heartbeats so the system can identify live worker nodes and expose their runtime state.
+### Workers and Nodes
 
----
+```text
+GET /api/workers
+GET /api/nodes
+```
 
-# Design Principles
+## How Task Processing Works
 
-The project focuses on a few important distributed-systems principles:
+A normal task follows this flow:
 
-### Atomicity
+```text
+Submit
+  |
+  v
+Task record
+  |
+  +---- delayed ----> Delayed Queue ----+
+  |                                     |
+  +-------------------------------------+
+                    |
+                    v
+                Ready Queue
+                    |
+                    v
+                Processing
+                    |
+          +---------+---------+
+          |                   |
+       Success             Failure
+          |                   |
+          v                   v
+      Completed             Retry
+                              |
+                     retries remaining?
+                       /           \
+                     yes           no
+                      |             |
+                      v             v
+                   Queue          DLQ
+```
 
-Operations that modify multiple pieces of Redis state should happen atomically, preferably through Lua scripts.
+When a worker claims a task, Redis stores a lease for it. The lease prevents a task from being considered permanently owned by a worker that may have stopped responding.
 
-### Explicit task state
+The API runs a background reaper every `REAPER_INTERVAL_MS` (default 5000). It first
+reclaims tasks from nodes whose heartbeat has expired, then scans expired leases.
+Reclaimed tasks consume a retry and return to the ready queue; tasks with no
+retries left move to the DLQ. Dead nodes remain visible as `alive=false` for
+`DEAD_NODE_GRACE_MS` (default 30000) before they are removed from the node list.
 
-Task state is persisted independently from queue membership so tasks can be inspected and recovered.
+## Retries and Dead Letters
 
-### Lease-based processing
+A failed task can be retried up to `max_retries`.
 
-Workers do not own tasks forever. Processing ownership is represented through a lease with a visibility timeout.
+Retry delays use exponential backoff and are capped by the queue implementation.
 
-### Failure recovery
+When retries are exhausted, the task is moved to the dead-letter queue.
 
-Worker crashes should not permanently lose tasks.
+Failed tasks can be inspected and redriven through:
 
-### Separation of responsibilities
+```text
+GET /api/tasks/failed
+GET /api/tasks/failed/redrive
+```
 
-API, queue, broker, worker, persistence, scheduling, and task handlers have separate responsibilities.
+## Cluster and Worker State
 
----
+Each worker process registers as a node and maintains a Redis TTL-based heartbeat.
 
-# Project Status
+The cluster exposes:
 
-This project is an ongoing implementation and focused on building a distributed task queue from the ground up.
+* Node identity
+* Hostname
+* Role
+* Capacity
+* Liveness
+* In-flight task count
+* Individual worker state
 
-Implemented areas currently include:
+Useful endpoints:
 
-* Task persistence
-* Task submission API
-* Priority queue
-* Delayed scheduling
-* Atomic Redis/Lua queue operations
-* Worker pool
-* Task execution
-* Task leases
-* Lease extension
-* Retries
-* Backoff
-* Dead-letter queue
-* Failed-task inspection
-* Failed-task redrive
-* Metrics
+```text
+GET /api/nodes
+GET /api/workers
+GET /api/events/cluster
+```
 
-Cluster membership and heartbeat support is the next development stage.
+## Redis Data Model
 
----
+Some of the main Redis structures are:
 
-# License
+```text
+taskqueue:task:{id}       Task record
+taskqueue:ready           Ready-task ZSET
+taskqueue:delayed         Delayed-task ZSET
+taskqueue:processing      Processing/lease ZSET
+taskqueue:deadletter      Dead-letter LIST
+taskqueue:metrics         Metrics HASH
+taskqueue:events          Event LIST
+taskqueue:events:cluster  Cluster event LIST
+taskqueue:nodes           Node SET
+taskqueue:workers         Worker state HASH
+```
 
-This project is currently a personal development/learning project.
+Lua scripts are used for critical atomic queue and lease operations.
+
+## Development
+
+Run Ruff:
+
+```bash
+uv run ruff check .
+```
