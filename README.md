@@ -1,6 +1,6 @@
 # Distributed Task Queue
 
-A small Redis-backed distributed task queue built with **Python, FastAPI, asyncio, and Redis**.
+A Redis-backed distributed task queue built with **Python, FastAPI, asyncio, and Redis**.
 
 ## What it supports
 
@@ -286,6 +286,16 @@ GET  /api/tasks/failed/redrive
 GET /api/metrics
 GET /api/metrics/enhanced
 ```
+
+### Health
+
+`GET /api/health` checks Redis. It returns HTTP 200 with
+`{"status":"healthy","redis":"connected"}` when ready, or HTTP 503 with
+`{"status":"unhealthy","redis":"unavailable"}` when Redis is unavailable.
+
+Worker processes handle SIGINT and SIGTERM by finishing in-flight tasks,
+removing their worker state, and deregistering their node. `DRAIN_TIMEOUT_MS`
+limits each task handler's execution time and therefore bounds normal drain time.
 
 ### Events
 
