@@ -2,7 +2,7 @@
 -- Atomically recovers one task from the processing ZSET. An expired-lease
 -- scan reclaims only leases due by ARGV[2]. A dead-node scan reclaims tasks
 -- owned by ARGV[3] immediately, but only while that node's heartbeat is absent.
--- The processing ZREM is the race guard against ACK, NACK, and other reapers.
+-- The processing ZREM is the race guard against ACK, fail, and other reapers.
 --
 -- KEYS[1] = processing/lease ZSET (taskqueue:processing)
 -- KEYS[2] = ready task ZSET (taskqueue:ready)
@@ -75,7 +75,7 @@ elseif lease_deadline_ms > now_ms then
 end
 
 -- Only the caller that removes the lease may alter its task state. Redis
--- serializes this script with ACK/NACK and other reclaim attempts.
+-- serializes this script with ACK/fail and other reclaim attempts.
 if redis.call('ZREM', processing_key, task_id) ~= 1 then
     return 0
 end

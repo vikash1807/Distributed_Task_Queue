@@ -10,9 +10,8 @@ from app.broker import RedisBroker
 from app.core.config import load_config
 from app.core.logging import setup_logging
 from app.handler import create_registry
-from app.queue import DelayedScheduler, PriorityQueue
+from app.queue import PriorityQueue
 from app.store import (
-    DeadLetterStore,
     EventStore,
     MetricStore,
     NodeStore,
@@ -56,15 +55,6 @@ async def run() -> None:
 
         task_queue = PriorityQueue(redis, task_store)
 
-        delayed = DelayedScheduler(
-            client=redis,
-            queue=task_queue,
-            event_store=event_store,
-            task_store=task_store,
-        )
-
-        dead_letter = DeadLetterStore(redis)
-
         # One node ID represents this worker process.
         node_id = create_node_id()
 
@@ -80,12 +70,9 @@ async def run() -> None:
             ExecutorDeps(
                 broker=redis_broker,
                 handlers=create_registry(),
-                delayed=delayed,
                 event_store=event_store,
                 metric_store=metric_store,
                 worker_state=worker_state,
-                task_store=task_store,
-                dead_letter=dead_letter,
                 drain_timeout=config.drain_timeout
             )
         )
