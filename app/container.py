@@ -7,19 +7,20 @@ from dataclasses import dataclass
 import redis.asyncio as redis
 
 from app.core.config import Config
-from app.queue import PriorityQueue, DelayedScheduler
-from app.service import(
-    TaskService,
-    MetricService,
+from app.queue import DelayedScheduler, PriorityQueue
+from app.reaper import Reaper
+from app.service import (
     EventService,
+    MetricService,
+    TaskService,
     WorkerNodeService,
 )
 from app.store import (
-    TaskStore,
     DeadLetterStore,
-    MetricStore,
     EventStore,
+    MetricStore,
     NodeStore,
+    TaskStore,
     WorkerStateStore,
 )
 
@@ -39,6 +40,7 @@ class AppContainer:
     metric_service: MetricService
     task_service: TaskService
     worker_node_service: WorkerNodeService
+    reaper: Reaper
 
 
 def build_container(client: redis.Redis, config: Config) -> AppContainer:
@@ -75,6 +77,14 @@ def build_container(client: redis.Redis, config: Config) -> AppContainer:
         worker_state=worker_state_store,
         node_store=node_store
     )
+    reaper = Reaper(
+        client=client,
+        node_store=node_store,
+        event_store=event_store,
+        interval=config.reaper_interval,
+        dead_node_grace_ms=config.dead_node_grace_ms,
+        signal_cap=config.signal_cap,
+    )
 
     return AppContainer(
         redis=client,
@@ -90,4 +100,5 @@ def build_container(client: redis.Redis, config: Config) -> AppContainer:
         metric_service=metric_service,
         task_service=task_service,
         worker_node_service=worker_node_service,
+        reaper=reaper,
     )

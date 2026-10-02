@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,6 +24,7 @@ class Config(BaseSettings):
     drain_timeout_ms: int = Field(5000, validation_alias="DRAIN_TIMEOUT_MS")
 
     visibility_timeout_ms: int = Field(30000, validation_alias="VISIBILITY_TIMEOUT_MS")
+    reaper_interval_ms: int = Field(5000, validation_alias="REAPER_INTERVAL_MS")
 
     signal_block_ms: int = Field(1000, validation_alias="SIGNAL_BLOCK_MS")
     signal_cap: int = Field(1024, validation_alias="SIGNAL_CAP")
@@ -36,7 +38,11 @@ class Config(BaseSettings):
     @property
     def visibility_timeout(self) -> float:
         return self.visibility_timeout_ms / 1000
-    
+
+    @property
+    def reaper_interval(self) -> float:
+        return self.reaper_interval_ms / 1000
+
     @property
     def poll_interval(self) -> float:
         return self.poll_interval_ms / 1000
@@ -44,11 +50,11 @@ class Config(BaseSettings):
     @property
     def drain_timeout(self) -> float:
         return self.drain_timeout_ms / 1000
-    
+
     @property
     def signal_block(self) -> float:
         return self.signal_block_ms / 1000
-    
+
     @property
     def heartbeat_interval(self) -> float:
         return self.heartbeat_interval_ms / 1000
@@ -76,6 +82,8 @@ class Config(BaseSettings):
             raise ValueError(f"config: WORKER_COUNT must be > 0, got {self.worker_count}")
         if self.visibility_timeout_ms <= 0:
             raise ValueError("config: VISIBILITY_TIMEOUT_MS must be > 0")
+        if self.reaper_interval_ms <= 0:
+            raise ValueError("config: REAPER_INTERVAL_MS must be > 0")
         if self.poll_interval_ms <= 0:
             raise ValueError("config: POLL_INTERVAL_MS must be > 0")
         if self.drain_timeout_ms <= 0:

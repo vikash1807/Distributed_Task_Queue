@@ -1,9 +1,9 @@
 # app/main.py
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
 
-import asyncio
 import uvicorn
 from fastapi import FastAPI
 
@@ -11,7 +11,6 @@ from app.api.router import configure_api
 from app.container import build_container
 from app.core import load_config, setup_logging
 from app.store import new_redis
-
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -29,10 +28,10 @@ def build_config():
 
 _cfg = build_config()
 
-schedule_task = None
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    schedule_task = None
+    reaper_task = None
     redis = new_redis(
         addr=_cfg.redis_addr,
         password=_cfg.redis_pass,
@@ -47,23 +46,27 @@ async def lifespan(app: FastAPI):
 
         scheduler = app.state.container.delayed_scheduler
         schedule_task = asyncio.create_task(scheduler.run())
+        reaper_task = asyncio.create_task(app.state.container.reaper.run())
 
         yield
 
     except Exception as exc:
-        logger.error("redis connection error: %s", exc)
-    
+        logger.exception("application startup or runtime failed: %s", exc)
+        raise
+
     finally:
-
-        if schedule_task is not None:
-            schedule_task.cancel()
-            try:
-                await schedule_task
-            except asyncio.CancelledError:
-                pass
-
-        await redis.aclose()
-        logger.info("redis connection closed")
+        tasks = [task for task in (reaper_task, schedule_task) if task is not None]
+        for task in tasks:
+            task.cancel()
+        try:
+            for result in await asyncio.gather(*tasks, return_exceptions=True):
+                if isinstance(result, BaseException) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    logger.error("background service stopped with error: %s", result)
+        finally:
+            await redis.aclose()
+            logger.info("redis connection closed")
 
 
 app = FastAPI(lifespan=lifespan)

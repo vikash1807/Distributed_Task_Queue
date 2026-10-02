@@ -101,6 +101,7 @@ class Metrics(BaseModel):
     total_processed: int = 0
     total_failed: int = 0
     total_retries: int = 0
+    reaper_reclaims: int = 0
     queue_size: int = 0
     active_workers: int = 0
 

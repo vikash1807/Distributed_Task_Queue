@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import redis.asyncio as redis
 
-from app.model import Metrics, EnhancedMetrics
+from app.model import EnhancedMetrics, Metrics
 from app.store.redis import KEY_METRICS
 
 
@@ -18,7 +18,7 @@ def _parse_i64(s: object) -> int:
 class MetricStore:
     def __init__(self, client: redis.Redis) -> None:
         self.client = client
-    
+
     async def incr_processed(self) -> None:
         await self.client.hincrby(KEY_METRICS, "processed", 1)
 
@@ -38,6 +38,7 @@ class MetricStore:
             total_processed=_parse_i64(data.get("processed")),
             total_failed=_parse_i64(data.get("failed")),
             total_retries=_parse_i64(data.get("retries")),
+            reaper_reclaims=_parse_i64(data.get("reaper_reclaims")),
             queue_size=queue_size,
             active_workers=active_workers,
         )
@@ -60,17 +61,15 @@ class MetricStore:
         success_rate = (processed / total) * 100 if total else 0.0
 
         return EnhancedMetrics(
-            metrics=Metrics(
-                total_processed=processed,
-                total_failed=failed,
-                total_retries=retries,
-                queue_size=queue_size,
-                active_workers=active_workers,
-            ),
+            total_processed=processed,
+            total_failed=failed,
+            total_retries=retries,
+            reaper_reclaims=_parse_i64(data.get("reaper_reclaims")),
+            queue_size=queue_size,
+            active_workers=active_workers,
             success_rate=success_rate,
             delayed_queue_size=delayed_size,
             dead_letter_size=dead_letter_size,
             total_submitted=submitted,
         )
-    
 
