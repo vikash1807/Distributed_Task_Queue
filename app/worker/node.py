@@ -31,7 +31,7 @@ def get_hostname() -> str:
     """The OS hostname, or "node" if it can't be determined."""
     try:
         return socket.gethostname()
-    except:
+    except OSError:
         return "node"
 
 
@@ -91,65 +91,68 @@ class Node:
             started_at=utc_now()
         )
 
+        await self.node_cfg.node_store.register(node)
+        logger.info("node registered node_id=%s", node.id)
+
+        # Keep the heartbeat alive while in-flight work drains. If shutdown
+        # fails, leave the node registered so the reaper can recover its leases.
+        heartbeat_stop = asyncio.Event()
+        hb_task = asyncio.create_task(self._heartbeat_loop(node, heartbeat_stop))
+        stop_waiter = None
+        worker_waiter = None
+        graceful = False
+        drained = False
+
         try:
-            await self.node_cfg.node_store.register(node)
-
-            logger.info(
-                "node registered node_id=%s, host=%s, capacity=%d",
-                self.node_cfg.node_id,
-                self.node_cfg.hostname,
-                self.node_cfg.capacity
-            )
-
-            # emit node_joined event
             await self._emit_joined_event()
+            await self.pool.start(node.id)
+            logger.info("node started node_id=%s capacity=%d", node.id, node.capacity)
 
-        except Exception:
-            logger.exception("node registration failed.")
-        
-        # heartbet runs independently of task execution so a busy node still refreshes.
-        # it stop when `stop` is set.
-        hb_task = asyncio.create_task(
-            self._heartbeat_loop(node, stop)
-        )
-        
-        try:
-            await self.pool.start(self.node_cfg.node_id)
-            logger.info(
-                "node started node_id = %s, role = %s, capacity = %d",
-                self.node_cfg.node_id,
-                self.node_cfg.role,
-                self.node_cfg.capacity
+            stop_waiter = asyncio.create_task(stop.wait())
+            worker_waiter = asyncio.create_task(self.pool.wait_for_unexpected_exit())
+            done, _ = await asyncio.wait(
+                (stop_waiter, worker_waiter, hb_task),
+                return_when=asyncio.FIRST_COMPLETED,
             )
-            # Keep the process alive until it receives SIGINT/SIGTERM.
-            await stop.wait()
+            if stop_waiter in done:
+                graceful = True
+            else:
+                for task in done:
+                    if task.cancelled():
+                        raise RuntimeError("worker or heartbeat cancelled unexpectedly")
+                    task.result()
+                raise RuntimeError("worker heartbeat stopped unexpectedly")
 
         except asyncio.CancelledError:
-            # Propagate cancellation after cleanup in finally blocks.
-            logger.info("worker process cancellation requested")
-            raise
-        
-        except Exception:
-            logger.exception("worker process failed")
+            logger.info("worker node cancellation requested node_id=%s", node.id)
+            graceful = True
             raise
 
         finally:
-            # stop workers before removing the node from cluster.
-            await self.pool.stop()
-        
-            # wait for hb loop to observe cancellation before de-register.
-            # so it can't re-create the hb key after deletion.
-            await hb_task
+            stop.set()
+            for task in (stop_waiter, worker_waiter):
+                if task is not None:
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in (stop_waiter, worker_waiter) if task is not None),
+                return_exceptions=True,
+            )
 
             try:
-                await self.node_cfg.node_store.deregister(self.node_cfg.node_id)
-                logger.info("node de-registered node_id = %s", self.node_cfg.node_id)
-            except Exception:
-                logger.exception(
-                    "node de-registeration failed node_id = %s",
-                    self.node_cfg.node_id
-                )
-            await self.pool.stop()
+                await self.pool.stop()
+                drained = True
+            finally:
+                heartbeat_stop.set()
+                heartbeat_result = await asyncio.gather(hb_task, return_exceptions=True)
+                if isinstance(heartbeat_result[0], BaseException):
+                    logger.error("heartbeat stopped with error: %s", heartbeat_result[0])
+
+                if graceful and drained:
+                    try:
+                        await self.node_cfg.node_store.deregister(node.id)
+                        logger.info("node deregistered node_id=%s", node.id)
+                    except Exception:
+                        logger.exception("node deregistration failed node_id=%s", node.id)
 
     async def _heartbeat_loop(self, node: NodeRecord, stop: asyncio.Event) -> None:
         """Refresh the node heartbeat until shutdown."""

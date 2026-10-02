@@ -20,7 +20,7 @@ class Config(BaseSettings):
 
     worker_count: int = Field(5, validation_alias="WORKER_COUNT")
     poll_interval_ms: int = Field(500, validation_alias="POLL_INTERVAL_MS")
-    # Budget for post-cancellation Redis writes on shutdown.
+    # Per-handler execution limit, which also bounds in-flight shutdown drain.
     drain_timeout_ms: int = Field(5000, validation_alias="DRAIN_TIMEOUT_MS")
 
     visibility_timeout_ms: int = Field(30000, validation_alias="VISIBILITY_TIMEOUT_MS")

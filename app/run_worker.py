@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 
 from app.broker import RedisBroker
 from app.core.config import load_config
 from app.core.logging import setup_logging
 from app.handler import create_registry
-from app.queue import DelayedScheduler, PriorityQueue
+from app.queue import PriorityQueue
 from app.store import (
-    DeadLetterStore,
     EventStore,
     MetricStore,
     NodeStore,
@@ -55,15 +55,6 @@ async def run() -> None:
 
         task_queue = PriorityQueue(redis, task_store)
 
-        delayed = DelayedScheduler(
-            client=redis,
-            queue=task_queue,
-            event_store=event_store,
-            task_store=task_store,
-        )
-
-        dead_letter = DeadLetterStore(redis)
-
         # One node ID represents this worker process.
         node_id = create_node_id()
 
@@ -79,12 +70,9 @@ async def run() -> None:
             ExecutorDeps(
                 broker=redis_broker,
                 handlers=create_registry(),
-                delayed=delayed,
                 event_store=event_store,
                 metric_store=metric_store,
                 worker_state=worker_state,
-                task_store=task_store,
-                dead_letter=dead_letter,
                 drain_timeout=config.drain_timeout
             )
         )
@@ -112,6 +100,14 @@ async def run() -> None:
 
         # Application-level shutdown signal.
         stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def request_stop() -> None:
+            logger.info("worker process shutdown requested")
+            stop.set()
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, request_stop)
 
         try:
             await node.run(stop)
@@ -124,6 +120,10 @@ async def run() -> None:
         except Exception:
             logger.exception("worker process failed")
             raise
+
+        finally:
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(sig)
 
     finally:
         await redis.aclose()

@@ -20,6 +20,10 @@ class WorkerStateStore:
             state.id,
             json.dumps(state.to_dict())
         )
+
+    async def delete(self, worker_id: str) -> None:
+        """Remove a worker's state when its executor stops."""
+        await self.client.hdel(KEY_WORKERS, worker_id)
     
     async def get_all(self) -> list[WorkerState]:
         """Returns all worker states."""
@@ -37,7 +41,3 @@ class WorkerStateStore:
                 continue
 
         return states
-        
-
-
-        

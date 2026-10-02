@@ -4,7 +4,7 @@
 Lease-based broker
 
 ``dequeue`` atomically moves a task from the ready set into a processing set with a visibility timeout (lease deadline), stamping this node's ID as owner. 
-``ack``/``nack`` release the lease with owner-fencing (a worker whose lease already expired cannot clobber a task re-leased elsewhere); 
+``ack``/``fail`` release the lease with owner-fencing (a worker whose lease already expired cannot clobber a task re-leased elsewhere);
 the reaper reclaims expired leases. 
 Every multi-step mutation is a single Lua script so a crash mid-mutation can never lose or double-book a task.
 """
@@ -25,6 +25,9 @@ from app.store import (
     KEY_PROCESSING,
     KEY_READY,
     KEY_READY_SIGNAL,
+    KEY_DELAYED,
+    KEY_DEADLETTER,
+    KEY_METRICS,
     KEY_TASK_PREFIX,
     TaskStore,
 )
@@ -44,7 +47,7 @@ class LeaseNotHeld(Exception):
 class RedisBroker:
     """
     The Redis-backed broker. Each instance belongs to one node; its ``node_id`` is stamped on every task it leases so the reaper can reclaim this node's work if
-    it dies, and so ack/nack can fence against a lease re-leased elsewhere.
+    it dies, and so ack/fail can fence against a lease re-leased elsewhere.
     
     Each Broker instance represents one worker node. The node ID is stored as the owner of tasks claimed by this broker.
 
@@ -52,8 +55,8 @@ class RedisBroker:
 
     - dequeue.lua: atomically claims a task from `ready`
     - ack.lua: completes an owned task
-    - nack.lua: releases an owned task
     - extend.lua: extends an active lease
+    - fail.lua: atomically routes a failed task to delayed or the DLQ
 
     All operations that modify lease state are delegated to Redis Lua scripts so the individual Redis mutations happen atomically.
     """
@@ -76,8 +79,8 @@ class RedisBroker:
         # Register Lua scripts once when the broker is created.
         self._dequeue = client.register_script(load_script("dequeue.lua"))
         self._ack = client.register_script(load_script("ack.lua"))
-        self._nack = client.register_script(load_script("nack.lua"))
         self._extend = client.register_script(load_script("extend.lua"))
+        self._fail = client.register_script(load_script("fail.lua"))
 
     def _lease_deadline(self) -> int:
         """Return the lease deadline as Unix time in milliseconds."""
@@ -150,27 +153,29 @@ class RedisBroker:
         if int(result) == 0:
             raise LeaseNotHeld(task_id)
     
-    async def nack(self, task_id: str) -> None:
-        """
-        Release a task that could not be completed.
-        Owner fencing is performed by the Lua script.
+    async def fail(
+        self, task_id: str, error: str, retry_at: float, failed_task_json: str,
+    ) -> int:
+        """Atomically move a failed attempt to delayed or the DLQ.
 
-        Raises:
-            LeaseNotHeld: if this node does not own the lease.
+        Returns 1 for a retry and 2 for a dead letter. A lost lease cannot
+        change the task or create a second queue entry.
         """
-        result = await self._nack(
+        result = await self._fail(
             keys=[
                 KEY_PROCESSING,
                 key_task(task_id),
                 node_tasks_key(self.node_id),
+                KEY_DELAYED,
+                KEY_DEADLETTER,
+                KEY_METRICS,
             ],
-            args=[
-                task_id,
-                self.node_id,
-            ],
+            args=[task_id, self.node_id, error, str(retry_at), failed_task_json],
         )
-        if int(result) == 0:
-                    raise LeaseNotHeld(task_id)
+        route = int(result)
+        if route == 0:
+            raise LeaseNotHeld(task_id)
+        return route
 
     async def extend_lease(
         self,
