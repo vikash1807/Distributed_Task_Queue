@@ -35,6 +35,7 @@ class Pool:
 
         self._stop = asyncio.Event()
         self._workers: list[asyncio.Task] = []
+        self._worker_ids: list[str] = []
     
     async def start(self, node_id: str) -> None:
         """Launch the worker tasks. They run until ``stop`` is called."""
@@ -44,16 +45,11 @@ class Pool:
 
             # Create unique worker ids
             worker_id = f"{node_id}:{i+1}"
+            self._worker_ids.append(worker_id)
             
-            try:
-                await self.worker_state.set(
-                    WorkerState(
-                        id = worker_id,
-                        status = "idle",
-                    )
-                )
-            except Exception as exc:
-                pass
+            await self.worker_state.set(
+                WorkerState(id=worker_id, status="idle")
+            )
 
             self._workers.append(
                 asyncio.create_task(self._worker(worker_id))
@@ -69,10 +65,37 @@ class Pool:
 
         self._stop.set()
         if self._workers:
-            await asyncio.gather(*self._workers, return_exceptions=True)
-
+            results = await asyncio.gather(*self._workers, return_exceptions=True)
+        else:
+            results = []
         self._workers.clear()
+        for worker_id in self._worker_ids:
+            try:
+                await self.worker_state.delete(worker_id)
+            except Exception:
+                logger.exception("failed to remove worker state worker_id=%s", worker_id)
+        self._worker_ids.clear()
+
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if errors:
+            for error in errors:
+                logger.error("worker exited with error: %s", error)
+            raise RuntimeError("worker pool did not drain cleanly") from errors[0]
         logger.info("worker pool stopped")
+
+    async def wait_for_unexpected_exit(self) -> None:
+        """Fail the node if a worker exits before shutdown begins."""
+        done, _ = await asyncio.wait(
+            self._workers,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in done:
+            if task.cancelled():
+                raise RuntimeError("worker task was cancelled unexpectedly")
+            error = task.exception()
+            if error is not None:
+                raise RuntimeError("worker task stopped unexpectedly") from error
+        raise RuntimeError("worker task exited unexpectedly")
     
     async def _worker(self, worker_id: int) -> None:
         """Claim and execute tasks until shutdown.
@@ -99,14 +122,13 @@ class Pool:
                 await self.executor.execute(task, worker_id)
             
             except asyncio.CancelledError:
-                # Worker cancellation is expected during shutdown.
-                break
+                raise
 
             except Exception:
                 # A broker/worker error should not terminate the worker.
                 # Wait briefly before trying again to avoid a tight error loop.
 
-                logger.exception("worker error worker_id=%d", worker_id)
+                logger.exception("worker error worker_id=%s", worker_id)
                 await asyncio.sleep(self.poll_interval)
         
         logger.info("worker stopped worker_id = %s", worker_id)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 
 from app.broker import RedisBroker
 from app.core.config import load_config
@@ -112,6 +113,14 @@ async def run() -> None:
 
         # Application-level shutdown signal.
         stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def request_stop() -> None:
+            logger.info("worker process shutdown requested")
+            stop.set()
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, request_stop)
 
         try:
             await node.run(stop)
@@ -124,6 +133,10 @@ async def run() -> None:
         except Exception:
             logger.exception("worker process failed")
             raise
+
+        finally:
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(sig)
 
     finally:
         await redis.aclose()
