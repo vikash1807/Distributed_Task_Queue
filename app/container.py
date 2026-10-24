@@ -61,6 +61,7 @@ def build_container(client: redis.Redis, config: Config) -> AppContainer:
 
     event_service = EventService(event_store)
     task_service = TaskService(
+        signal_cap=config.signal_cap,
         task_queue=task_queue,
         delayed_queue=delayed_scheduler,
         dead_letter=dead_letter,
