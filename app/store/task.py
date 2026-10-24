@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any
 
 import redis.asyncio as redis
 
-from app.model import Task, TaskStatus, TaskNotFound
-from app.store.redis import key_task
+from app.core.leadership import LeaderLease, LeadershipLost
+from app.model import Task, TaskEvent, TaskNotFound, TaskStatus
+from app.store.redis import (
+    KEY_CRON_JOBS,
+    KEY_DELAYED,
+    KEY_EVENTS,
+    KEY_LEADER,
+    KEY_METRICS,
+    KEY_READY,
+    KEY_READY_SIGNAL,
+    key_cron,
+    key_task,
+)
 
 
 def task_to_hash(task: Task) -> dict[str, Any]:
@@ -23,16 +36,13 @@ def task_to_hash(task: Task) -> dict[str, Any]:
         "max_retries": task.max_retries,
         "retries": task.retries,
         "status": task.status.value,
-        "created_at": (
-            task.created_at.isoformat()
-            if task.created_at is not None
-            else ""
-        ),
+        "created_at": (task.created_at.isoformat() if task.created_at is not None else ""),
         "error": task.error,
         "owner": task.owner,
     }
 
-def hash_to_task(data: Dict[str, Any]) -> Task:
+
+def hash_to_task(data: dict[str, Any]) -> Task:
     """Convert a Redis hash back into a Task."""
     payload: Any = None
 
@@ -54,7 +64,7 @@ def hash_to_task(data: Dict[str, Any]) -> Task:
         task_status = TaskStatus(data.get("status", "pending"))
     except ValueError:
         task_status = TaskStatus.PENDING
-    
+
     return Task(
         id=data.get("id", ""),
         type=data.get("type", ""),
@@ -70,26 +80,78 @@ def hash_to_task(data: Dict[str, Any]) -> Task:
     )
 
 
-
 class TaskStore:
+    """Persist canonical task records and atomically create queue entries."""
 
     def __init__(self, client: redis.Redis) -> None:
+        """Bind Redis and register the shared task/cron submission script."""
         self.client = client
-    
+        self._submit = client.register_script(
+            (Path(__file__).parent / "scripts" / "submit.lua").read_text()
+        )
+
+    async def submit(
+        self,
+        task: Task,
+        event: TaskEvent,
+        signal_cap: int,
+        *,
+        lease: LeaderLease | None = None,
+        cron_id: str = "",
+        revision: str = "",
+        cursor: int | None = None,
+        slot: int = 0,
+    ) -> int:
+        """Create a task once, optionally committing a guarded cron cursor in the same script.
+
+        Return 1 for creation, 0 for an existing task, or -2 for a stale cron snapshot.
+        Leadership loss raises instead of returning a normal submission outcome.
+        """
+        if bool(cron_id) != bool(revision) or (cron_id and lease is None):
+            raise ValueError("cron submission requires a definition revision and leader lease")
+        if lease is not None:
+            lease.check()
+        # One script prevents a saved task from being stranded outside its queue on failure.
+        outcome = int(
+            await self._submit(
+                keys=[
+                    key_task(task.id),
+                    KEY_READY,
+                    KEY_DELAYED,
+                    KEY_READY_SIGNAL,
+                    KEY_METRICS,
+                    KEY_EVENTS,
+                    KEY_LEADER,
+                    key_cron(cron_id) if cron_id else KEY_CRON_JOBS,
+                ],
+                args=[
+                    # Preserve integer fields exactly through Lua's double-based JSON decoder.
+                    json.dumps({key: str(value) for key, value in task_to_hash(task).items()}),
+                    event.model_dump_json(),
+                    int(time.time() + task.delay) if task.delay > 0 else 0,
+                    signal_cap,
+                    lease.value if lease is not None else "",
+                    revision,
+                    str(cursor) if cursor is not None else "",
+                    slot,
+                ],
+            )
+        )
+        if outcome == -1:
+            raise LeadershipLost("submission rejected")
+        return outcome
+
     async def save(self, task: Task) -> None:
         """Create or fully overwrite a task's canonical record."""
-        await self.client.hset(
-            key_task(task.id),
-            mapping = task_to_hash(task)
-        )
-    
+        await self.client.hset(key_task(task.id), mapping=task_to_hash(task))
+
     async def get(self, task_id: str):
         """Returns a task by id."""
         data = await self.client.hgetall(key_task(task_id))
 
         if not data:
             raise TaskNotFound(task_id)
-        
+
         task = hash_to_task(data)
         return task
 
@@ -98,16 +160,15 @@ class TaskStore:
 
         return bool(await self.client.exists(key_task(task_id)))
 
-    async def get_many(self, task_ids: List[str]) -> List[Task]:
+    async def get_many(self, task_ids: list[str]) -> list[Task]:
+        """Pipeline task reads and skip IDs whose canonical record is absent."""
         if not task_ids:
             return []
-        
+
         async with self.client.pipeline(transaction=False) as pipe:
             for task_id in task_ids:
                 pipe.hgetall(key_task(task_id))
-            
-            results = await pipe.execute()
-        
-        return [hash_to_task(data) for data in results if data]
 
-    
+            results = await pipe.execute()
+
+        return [hash_to_task(data) for data in results if data]

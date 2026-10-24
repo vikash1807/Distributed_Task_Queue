@@ -15,6 +15,14 @@
 --          1 if this call created the tombstone (emit node_dead),
 --          2 if a tombstone already exists (do not emit node_dead again).
 
+-- KEYS[4] = leader lease STRING (optional for direct maintenance/tests).
+-- ARGV[3] = expected complete lease value; omitted only for direct maintenance.
+-- Returns -1 on leadership loss, before any mutation. A stale tenure cannot
+-- change state after expiry or takeover, even if its client loses a response.
+if ARGV[3] and redis.call('GET', KEYS[4]) ~= ARGV[3] then
+    return -1
+end
+
 local nodes_key = KEYS[1]
 local heartbeat_key = KEYS[2]
 local tombstone_key = KEYS[3]

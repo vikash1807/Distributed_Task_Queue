@@ -7,11 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Config(BaseSettings):
     """All configurations, read from environment with defaults."""
 
-    model_config = SettingsConfigDict(
-        case_sensitive=False,
-        extra='ignore',
-        populate_by_name=True
-    )
+    model_config = SettingsConfigDict(case_sensitive=False, extra="ignore", populate_by_name=True)
 
     redis_addr: str = Field("localhost:6379", validation_alias="REDIS_ADDR")
     redis_pass: str = Field("", validation_alias="REDIS_PASSWORD")
@@ -33,45 +29,55 @@ class Config(BaseSettings):
     heartbeat_interval_ms: int = Field(3000, validation_alias="HEARTBEAT_INTERVAL_MS")
     heartbeat_ttl_ms: int = Field(10000, validation_alias="HEARTBEAT_TTL_MS")
     dead_node_grace_ms: int = Field(30000, validation_alias="DEAD_NODE_GRACE_MS")
+    leader_eligible: bool = Field(True, validation_alias="LEADER_ELIGIBLE")
+    leader_ttl_ms: int = Field(10000, ge=300, validation_alias="LEADER_TTL_MS")
+    cron_tick_ms: int = Field(1000, gt=0, validation_alias="CRON_TICK_MS")
 
     # duration helpers (seconds)
     @property
     def visibility_timeout(self) -> float:
+        """Convert the processing lease duration from milliseconds to seconds."""
         return self.visibility_timeout_ms / 1000
 
     @property
     def reaper_interval(self) -> float:
+        """Convert the reaper scan interval to asyncio sleep seconds."""
         return self.reaper_interval_ms / 1000
 
     @property
     def poll_interval(self) -> float:
+        """Convert the worker error backoff to seconds."""
         return self.poll_interval_ms / 1000
 
     @property
     def drain_timeout(self) -> float:
+        """Convert the per-handler execution timeout to seconds."""
         return self.drain_timeout_ms / 1000
 
     @property
     def signal_block(self) -> float:
+        """Convert the blocking queue wait interval to seconds."""
         return self.signal_block_ms / 1000
 
     @property
     def heartbeat_interval(self) -> float:
+        """Convert the heartbeat refresh interval to seconds."""
         return self.heartbeat_interval_ms / 1000
 
     @property
     def heartbeat_ttl(self) -> float:
+        """Convert the node heartbeat lifetime to seconds."""
         return self.heartbeat_ttl_ms / 1000
 
     @property
     def node_grace_window(self) -> float:
+        """Convert the dead-node visibility grace period to seconds."""
         return self.dead_node_grace_ms / 1000
-
-
 
     # Validation
     @model_validator(mode="after")
     def _validate(self) -> Config:
+        """Reject invalid timings, capacities, and heartbeat relationships."""
         if not self.redis_addr:
             raise ValueError("config: REDIS_ADDR must not be empty")
         if not self.server_port:
@@ -107,5 +113,6 @@ class Config(BaseSettings):
 def load_config() -> Config:
     """Read configuration from enviornment, apply defaults, and validate."""
     return Config()
+
 
 settings = load_config()

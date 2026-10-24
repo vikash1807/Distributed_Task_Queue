@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from app.model import Task, TaskStatus, FailedTask, TaskEvent, TaskEventType
-from app.queue import PriorityQueue, DelayedScheduler
-from app.store import TaskStore, DeadLetterStore, MetricStore, EventStore
+from app.core import settings
+from app.model import FailedTask, Task, TaskEvent, TaskEventType, TaskStatus
+from app.queue import DelayedScheduler, PriorityQueue
+from app.store import DeadLetterStore, EventStore, MetricStore, TaskStore
 
 
 class DuplicateTaskError(Exception):
     """Raised when a caller submits a task ID that already exists."""
-
 
 
 def generate_task_id() -> str:
@@ -24,10 +24,13 @@ def generate_task_id() -> str:
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    """Return an aware UTC timestamp for task and event records."""
+    return datetime.now(UTC)
 
 
 class TaskService:
+    """Coordinate submission, inspection, and redrive of queued tasks."""
+
     def __init__(
         self,
         task_queue: PriorityQueue,
@@ -36,13 +39,16 @@ class TaskService:
         task_store: TaskStore,
         metric_store: MetricStore,
         event_store: EventStore,
+        signal_cap: int | None = None,
     ) -> None:
+        """Bind task persistence, queues, monitoring, and the wake-up token cap."""
         self.task_store = task_store
         self.task_queue = task_queue
         self.dead_letter = dead_letter
         self.delayed_queue = delayed_queue
         self.metric_store = metric_store
         self.event_store = event_store
+        self.signal_cap = settings.signal_cap if signal_cap is None else signal_cap
 
     async def submit_task(
         self,
@@ -54,12 +60,8 @@ class TaskService:
         delay: int = 0,
         max_retries: int = 0,
     ) -> Task:
+        """Build a pending task and atomically submit it exactly once per ID."""
         task_id = id or generate_task_id()
-
-        # Client-supplied ID: check for duplicates (idempotent enqueue. If a record 
-        # already exists, reject to prevent double-submission from network retries.
-        if id and await self.task_store.exists(task_id):
-            raise DuplicateTaskError(task_id)
 
         task = Task(
             id=task_id,
@@ -72,54 +74,42 @@ class TaskService:
             created_at=utc_now(),
         )
 
-        # Persist the record before referencing it's ID from any queue.
-        await self.task_store.save(task)
-
-        # Emit submitted Event
         event = TaskEvent(
             id=f"evt-{secrets.token_hex(12)}",
             task_id=task_id,
             type=TaskEventType.SUBMITTED,
             worker_id="-1",
             detail=f"Priority={priority}, Delay={delay}s, MaxRetries={max_retries}",
-            timestamp=utc_now()
+            timestamp=utc_now(),
         )
-        await self.event_store.push(event)
-
-        # Increment submitted tasks count in metrics
-        await self.metric_store.incr_submitted()
-
-        if delay > 0:
-            await self.delayed_queue.schedule(task, delay)
-        else:
-            await self.task_queue.enqueue(task)
+        if await self.task_store.submit(task, event, self.signal_cap) == 0:
+            raise DuplicateTaskError(task_id)
 
         return task
 
     async def get_task(self, task_id: str) -> Task:
+        """Read a task from its canonical Redis record."""
         return await self.task_store.get(task_id)
 
     async def get_failed_tasks(self, offset: int, limit: int) -> list[FailedTask]:
+        """Return a page of retained dead-letter records."""
         return await self.dead_letter.list(offset, limit)
-    
+
     async def redrive_failed_tasks(self) -> dict[str, Any]:
         """
         Pops all tasks from deadletter queue, resets their retries and status,
         updates their canonical record and re-enqueues them to READY.
         """
 
-        failed_tasks: list[FailedTask] = self.dead_letter.drain_all()
+        failed_tasks: list[FailedTask] = await self.dead_letter.drain_all()
+        redriven = 0
 
         if not failed_tasks:
-            return {
-                "redriven": 0,
-                "message":  "dead-letter queue is empty"
-            }
+            return {"redriven": 0, "message": "dead-letter queue is empty"}
 
         for failed_task in failed_tasks:
             task_data = {
-                k: v for k, v in failed_task.model_dump().items()
-                if k in Task.model_fields
+                k: v for k, v in failed_task.model_dump().items() if k in Task.model_fields
             }
 
             task = Task(**task_data)
@@ -146,11 +136,11 @@ class TaskService:
                 type=TaskEventType.REDRIVEN,
                 worker_id="-1",
                 detail="Moved from dead-letter queue back to ready",
-                timestamp=utc_now()
+                timestamp=utc_now(),
             )
             await self.event_store.push(event)
-        
+
         return {
-        "redriven": redriven,
-        "total": len(failed_tasks),
-    }
+            "redriven": redriven,
+            "total": len(failed_tasks),
+        }

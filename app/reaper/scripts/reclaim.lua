@@ -24,6 +24,14 @@
 --          2 if retries were exhausted and the task was sent to the DLQ,
 --          3 if an orphaned lease was removed (task record missing).
 
+-- KEYS[8] = leader lease STRING (optional for direct maintenance/tests).
+-- ARGV[6] = expected complete lease value; omitted only for direct maintenance.
+-- Returns -1 on leadership loss, before any mutation. A stale tenure cannot
+-- change state after expiry or takeover, even if its client loses a response.
+if ARGV[6] and redis.call('GET', KEYS[8]) ~= ARGV[6] then
+    return -1
+end
+
 local processing_key = KEYS[1]
 local ready_key = KEYS[2]
 local task_key = KEYS[3]

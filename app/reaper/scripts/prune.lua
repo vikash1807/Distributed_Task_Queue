@@ -15,6 +15,14 @@
 --
 -- Returns: 1 if the node was pruned, 0 if it must remain visible.
 
+-- KEYS[6] = leader lease STRING (optional for direct maintenance/tests).
+-- ARGV[3] = expected complete lease value; omitted only for direct maintenance.
+-- Returns -1 on leadership loss, before any mutation. A stale tenure cannot
+-- change state after expiry or takeover, even if its client loses a response.
+if ARGV[3] and redis.call('GET', KEYS[6]) ~= ARGV[3] then
+    return -1
+end
+
 local nodes_key = KEYS[1]
 local heartbeat_key = KEYS[2]
 local metadata_key = KEYS[3]
