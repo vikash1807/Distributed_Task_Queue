@@ -1,0 +1,69 @@
+# Share one image and runtime configuration between the API and independently scaled workers.
+x-application: &application
+  build:
+    context: .
+  image: ${COMPOSE_PROJECT_NAME:-taskqueue}-app:local
+  restart: unless-stopped
+  stop_grace_period: ${DOCKER_STOP_GRACE_PERIOD:-30s}
+  # Application startup fails fast without Redis, so wait for its readiness probe.
+  depends_on:
+    redis:
+      condition: service_healthy
+  environment:
+    # Bundled Redis and internal HTTP port are fixed for this local stack.
+    REDIS_ADDR: redis:6379
+    REDIS_PASSWORD: ""
+    SERVER_PORT: "8080"
+    WORKER_COUNT: ${WORKER_COUNT:-5}
+    POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-500}
+    DRAIN_TIMEOUT_MS: ${DRAIN_TIMEOUT_MS:-5000}
+    SIGNAL_BLOCK_MS: ${SIGNAL_BLOCK_MS:-1000}
+    SIGNAL_CAP: ${SIGNAL_CAP:-1024}
+    VISIBILITY_TIMEOUT_MS: ${VISIBILITY_TIMEOUT_MS:-30000}
+    REAPER_INTERVAL_MS: ${REAPER_INTERVAL_MS:-5000}
+    HEARTBEAT_INTERVAL_MS: ${HEARTBEAT_INTERVAL_MS:-3000}
+    HEARTBEAT_TTL_MS: ${HEARTBEAT_TTL_MS:-10000}
+    DEAD_NODE_GRACE_MS: ${DEAD_NODE_GRACE_MS:-30000}
+
+services:
+  api:
+    <<: *application
+    command: ["python", "-m", "app.main"]
+    ports:
+      # Publish only on host loopback; the API's internal port stays fixed at 8080.
+      - "127.0.0.1:${DOCKER_API_PORT:-8080}:8080"
+    healthcheck:
+      # Use Python's standard library rather than adding curl solely for readiness checks.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=2).close()"
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    <<: *application
+    # No host port or fixed container name is needed, allowing multiple worker replicas.
+    command: ["python", "-m", "app.run_worker"]
+
+  redis:
+    image: redis:8.2@sha256:164c759a0c342ee69d08fc99219382b0fd682181465c0df2e0e6911f4c85d73c
+    # AOF records writes; every-second fsync balances disk work against recent-write durability.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    restart: unless-stopped
+    stop_grace_period: ${DOCKER_STOP_GRACE_PERIOD:-30s}
+    volumes:
+      # Container recreation retains this data; compose down -v intentionally deletes it.
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  redis-data:
