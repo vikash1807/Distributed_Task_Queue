@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from fastapi import APIRouter, FastAPI
 
 from app.api.middleware import (
@@ -10,16 +9,19 @@ from app.api.middleware import (
     ExceptionRecoveryMiddleware,
     RequestLoggingMiddleware,
 )
-from app.api.routes.task import create_task_routes
-from app.api.routes.metrics import create_metrics_routes
 from app.api.routes.events import create_event_routes
 from app.api.routes.health import create_health_routes
+from app.api.routes.leader import create_leader_routes
+from app.api.routes.metrics import create_metrics_routes
+from app.api.routes.task import create_task_routes
 from app.api.routes.worker_nodes import create_worker_node_routes
 
 
 def create_api_router() -> APIRouter:
+    """Collect the HTTP routes under the shared /api prefix."""
     api_router = APIRouter(prefix="/api")
     api_router.include_router(create_health_routes())
+    api_router.include_router(create_leader_routes())
     api_router.include_router(create_task_routes())
     api_router.include_router(create_metrics_routes())
     api_router.include_router(create_event_routes())

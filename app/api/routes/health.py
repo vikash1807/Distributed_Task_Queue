@@ -12,14 +12,23 @@ logger = logging.getLogger(__name__)
 
 
 def create_health_routes() -> APIRouter:
+    """Register readiness checks for Redis and background supervision."""
     router = APIRouter(tags=["health"])
 
     @router.get("/health")
     async def health(request: Request) -> JSONResponse:
+        """Report unavailable dependencies or a failed leader supervisor."""
         container = getattr(request.app.state, "container", None)
         if container is None:
             return JSONResponse(
                 {"status": "unhealthy", "redis": "unavailable"},
+                status_code=503,
+            )
+
+        supervisor = getattr(container, "leader", None)
+        if supervisor is not None and supervisor.failed:
+            return JSONResponse(
+                {"status": "unhealthy", "background_services": "failed"},
                 status_code=503,
             )
 

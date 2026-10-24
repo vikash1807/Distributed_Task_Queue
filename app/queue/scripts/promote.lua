@@ -14,6 +14,14 @@
 --
 -- Returns: number of tasks promoted
 
+-- KEYS[5] = leader lease STRING (optional for direct maintenance/tests).
+-- ARGV[4] = expected complete lease value; omitted only for direct maintenance.
+-- Returns -1 on leadership loss, before any mutation. A stale tenure cannot
+-- change state after expiry or takeover, even if its client loses a response.
+if ARGV[4] and redis.call('GET', KEYS[5]) ~= ARGV[4] then
+    return -1
+end
+
 local delayed_key = KEYS[1]
 local ready_key = KEYS[2]
 local prefix = KEYS[3]
