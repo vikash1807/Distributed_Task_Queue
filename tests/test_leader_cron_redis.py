@@ -9,7 +9,8 @@ from redis.exceptions import ResponseError
 from app.container import build_container
 from app.core.config import Config
 from app.service.task import DuplicateTaskError
-from app.store.redis import KEY_DELAYED, KEY_EVENTS, KEY_METRICS, KEY_READY, key_task
+from app.store.leader import LeaderStore
+from app.store.redis import KEY_DELAYED, KEY_EVENTS, KEY_LEADER, KEY_METRICS, KEY_READY, key_task
 
 pytestmark = pytest.mark.anyio
 
@@ -33,6 +34,24 @@ async def redis():
     finally:
         await client.flushdb()
         await client.aclose()
+
+
+async def test_owner_only_renew_release_and_expiry(redis):
+    """Verify lease exclusion, expiry, and protection against an old owner."""
+    store = LeaderStore(redis, 300)
+    assert await store.acquire("first")
+    assert not await store.acquire("second")
+    assert not await store.renew("second")
+    assert not await store.release("second")
+    assert await store.renew("first")
+    assert 0 < await redis.pttl(KEY_LEADER) <= 300
+    await asyncio.sleep(0.31)
+    assert await store.acquire("second")
+    assert not await store.release("first")
+    assert not await store.renew("first")
+    assert await store.current() == "second"
+    assert await store.release("second")
+    assert not await store.release("second")
 
 
 async def test_atomic_ordinary_submission_and_preflight(redis):
