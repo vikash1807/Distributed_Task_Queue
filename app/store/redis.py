@@ -18,6 +18,12 @@ KEY_EVENTS_CLUSTER = "taskqueue:events:cluster"  # LIST of lifecycle-only events
 KEY_WORKERS = "taskqueue:workers"  # HASH of legacy per-executor worker state
 KEY_NODES = "taskqueue:nodes"  # SET of known node IDs
 KEY_LEADER = "taskqueue:leader"  # STRING: JSON identity/token, TTL in milliseconds
+KEY_CRON_JOBS = "taskqueue:cron:jobs"  # SET of persistent cron IDs
+
+
+def key_cron(cron_id: str) -> str:
+    """Persistent cron definition HASH, including its materialization cursor."""
+    return f"taskqueue:cron:job:{cron_id}"
 
 
 # Task records live under this prefix : taskqueue:task:{id} (HASH)

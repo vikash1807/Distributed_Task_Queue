@@ -24,9 +24,10 @@ x-application: &application
     HEARTBEAT_INTERVAL_MS: ${HEARTBEAT_INTERVAL_MS:-3000}
     HEARTBEAT_TTL_MS: ${HEARTBEAT_TTL_MS:-10000}
     DEAD_NODE_GRACE_MS: ${DEAD_NODE_GRACE_MS:-30000}
-    # API processes elect the owner of singleton background services.
+    # API processes use these settings; worker execution does not participate in election.
     LEADER_ELIGIBLE: ${LEADER_ELIGIBLE:-true}
     LEADER_TTL_MS: ${LEADER_TTL_MS:-10000}
+    CRON_TICK_MS: ${CRON_TICK_MS:-1000}
 
 services:
   api:

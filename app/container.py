@@ -16,6 +16,7 @@ from app.service import (
     TaskService,
     WorkerNodeService,
 )
+from app.service.cron import CronMaterializer, CronService
 from app.store import (
     DeadLetterStore,
     EventStore,
@@ -24,6 +25,7 @@ from app.store import (
     TaskStore,
     WorkerStateStore,
 )
+from app.store.cron import CronStore
 from app.store.leader import LeaderStore
 
 
@@ -45,6 +47,8 @@ class AppContainer:
     task_service: TaskService
     worker_node_service: WorkerNodeService
     reaper: Reaper
+    cron_service: CronService
+    cron_materializer: CronMaterializer
     leader: LeaderSupervisor
 
 
@@ -83,10 +87,17 @@ def build_container(client: redis.Redis, config: Config) -> AppContainer:
         signal_cap=config.signal_cap,
     )
 
+    cron_store = CronStore(client)
+    cron_materializer = CronMaterializer(
+        cron_store,
+        task_store,
+        tick=config.cron_tick_ms / 1000,
+        signal_cap=config.signal_cap,
+    )
     # Pass entrypoints rather than tasks so each acquisition starts fresh loops with its lease.
     leader = LeaderSupervisor(
         LeaderStore(client, config.leader_ttl_ms),
-        [delayed_scheduler.run, reaper.run],
+        [delayed_scheduler.run, reaper.run, cron_materializer.run],
         eligible=config.leader_eligible,
     )
 
@@ -105,5 +116,7 @@ def build_container(client: redis.Redis, config: Config) -> AppContainer:
         task_service=task_service,
         worker_node_service=worker_node_service,
         reaper=reaper,
+        cron_service=CronService(cron_store),
+        cron_materializer=cron_materializer,
         leader=leader,
     )

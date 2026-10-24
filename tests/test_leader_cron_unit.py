@@ -3,10 +3,16 @@
 import asyncio
 import time
 from unittest.mock import AsyncMock
+
 import pytest
+from pydantic import ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
+
+from app.core.config import Config
 from app.core.leadership import LeaderLease, LeadershipLost
 from app.leader import LeaderSupervisor
+from app.model.cron import CreateCron
+from app.service.cron import latest_slot
 
 pytestmark = pytest.mark.anyio
 
@@ -15,6 +21,44 @@ pytestmark = pytest.mark.anyio
 def anyio_backend():
     """Run async tests on asyncio, matching the application runtime."""
     return "asyncio"
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "* * * * * *",
+        "@daily",
+        "R * * * *",
+        "H * * * *",
+        "0 0 31 2 *",
+        "bad",
+    ],
+)
+def test_invalid_cron(expression):
+    """Reject unsupported syntax and schedules that cannot occur."""
+    with pytest.raises(ValidationError):
+        CreateCron(schedule=expression, type="hash")
+
+
+@pytest.mark.parametrize("expression", ["* * * * *", "0 0 29 2 *", "0 2 * * MON-FRI"])
+def test_valid_cron(expression):
+    """Accept ordinary UTC, leap-day, and named-weekday schedules."""
+    assert CreateCron(schedule=expression, type="hash").schedule == expression
+
+
+@pytest.mark.parametrize("now, expected", [(119, 60), (120, 120), (179, 120), (180, 180)])
+def test_latest_slot_includes_exact_boundary(now, expected):
+    """Include an exact minute boundary without selecting a future slot."""
+    assert latest_slot("* * * * *", now) == expected
+
+
+def test_config_validation():
+    """Enforce the minimum lease TTL and positive cron scan interval."""
+    with pytest.raises(ValidationError):
+        Config(leader_ttl_ms=299)
+    with pytest.raises(ValidationError):
+        Config(cron_tick_ms=0)
+    assert Config(leader_ttl_ms=300).leader_ttl_ms == 300
 
 
 @pytest.mark.parametrize("failure", [False, RedisConnectionError("offline"), "timeout"])

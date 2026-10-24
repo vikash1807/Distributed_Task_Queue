@@ -31,6 +31,7 @@ class Config(BaseSettings):
     dead_node_grace_ms: int = Field(30000, validation_alias="DEAD_NODE_GRACE_MS")
     leader_eligible: bool = Field(True, validation_alias="LEADER_ELIGIBLE")
     leader_ttl_ms: int = Field(10000, ge=300, validation_alias="LEADER_TTL_MS")
+    cron_tick_ms: int = Field(1000, gt=0, validation_alias="CRON_TICK_MS")
 
     # duration helpers (seconds)
     @property

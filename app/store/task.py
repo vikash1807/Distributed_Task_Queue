@@ -10,13 +10,17 @@ from typing import Any
 
 import redis.asyncio as redis
 
+from app.core.leadership import LeaderLease, LeadershipLost
 from app.model import Task, TaskEvent, TaskNotFound, TaskStatus
 from app.store.redis import (
+    KEY_CRON_JOBS,
     KEY_DELAYED,
     KEY_EVENTS,
+    KEY_LEADER,
     KEY_METRICS,
     KEY_READY,
     KEY_READY_SIGNAL,
+    key_cron,
     key_task,
 )
 
@@ -80,26 +84,62 @@ class TaskStore:
     """Persist canonical task records and atomically create queue entries."""
 
     def __init__(self, client: redis.Redis) -> None:
-        """Bind Redis and register the atomic submission script."""
+        """Bind Redis and register the shared task/cron submission script."""
         self.client = client
         self._submit = client.register_script(
             (Path(__file__).parent / "scripts" / "submit.lua").read_text()
         )
 
-    async def submit(self, task: Task, event: TaskEvent, signal_cap: int) -> int:
-        """Create a task atomically, returning 0 when its ID already exists."""
-        # One Redis call commits the record, queue membership, metric, and event together.
-        return int(await self._submit(
-            keys=[key_task(task.id), KEY_READY, KEY_DELAYED, KEY_READY_SIGNAL,
-                  KEY_METRICS, KEY_EVENTS],
-            args=[
-                # Pass integers as strings so Lua's JSON decoder cannot round their values.
-                json.dumps({key: str(value) for key, value in task_to_hash(task).items()}),
-                event.model_dump_json(),
-                int(time.time() + task.delay) if task.delay > 0 else 0,
-                signal_cap,
-            ],
-        ))
+    async def submit(
+        self,
+        task: Task,
+        event: TaskEvent,
+        signal_cap: int,
+        *,
+        lease: LeaderLease | None = None,
+        cron_id: str = "",
+        revision: str = "",
+        cursor: int | None = None,
+        slot: int = 0,
+    ) -> int:
+        """Create a task once, optionally committing a guarded cron cursor in the same script.
+
+        Return 1 for creation, 0 for an existing task, or -2 for a stale cron snapshot.
+        Leadership loss raises instead of returning a normal submission outcome.
+        """
+        if bool(cron_id) != bool(revision) or (cron_id and lease is None):
+            raise ValueError("cron submission requires a definition revision and leader lease")
+        if lease is not None:
+            lease.check()
+        # One script prevents a saved task from being stranded outside its queue on failure.
+        outcome = int(
+            await self._submit(
+                keys=[
+                    key_task(task.id),
+                    KEY_READY,
+                    KEY_DELAYED,
+                    KEY_READY_SIGNAL,
+                    KEY_METRICS,
+                    KEY_EVENTS,
+                    KEY_LEADER,
+                    key_cron(cron_id) if cron_id else KEY_CRON_JOBS,
+                ],
+                args=[
+                    # Preserve integer fields exactly through Lua's double-based JSON decoder.
+                    json.dumps({key: str(value) for key, value in task_to_hash(task).items()}),
+                    event.model_dump_json(),
+                    int(time.time() + task.delay) if task.delay > 0 else 0,
+                    signal_cap,
+                    lease.value if lease is not None else "",
+                    revision,
+                    str(cursor) if cursor is not None else "",
+                    slot,
+                ],
+            )
+        )
+        if outcome == -1:
+            raise LeadershipLost("submission rejected")
+        return outcome
 
     async def save(self, task: Task) -> None:
         """Create or fully overwrite a task's canonical record."""

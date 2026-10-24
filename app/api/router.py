@@ -9,6 +9,7 @@ from app.api.middleware import (
     ExceptionRecoveryMiddleware,
     RequestLoggingMiddleware,
 )
+from app.api.routes.cron import create_cron_routes
 from app.api.routes.events import create_event_routes
 from app.api.routes.health import create_health_routes
 from app.api.routes.leader import create_leader_routes
@@ -22,6 +23,7 @@ def create_api_router() -> APIRouter:
     api_router = APIRouter(prefix="/api")
     api_router.include_router(create_health_routes())
     api_router.include_router(create_leader_routes())
+    api_router.include_router(create_cron_routes())
     api_router.include_router(create_task_routes())
     api_router.include_router(create_metrics_routes())
     api_router.include_router(create_event_routes())
