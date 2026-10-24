@@ -5,6 +5,14 @@ Read `README.md` for product behavior and `CONTRIBUTING.md` for the contributor 
 - If you make any code changes then:
     - Final Response must have a detailed explaination of implementation approach, design decisions, files/components changed and why, and how it works.
 
+## Code documentation requirements
+
+- Whenever an agent writes or modifies code, include documentation as part of the change.
+- Every new or modified Python class, function, and method must have a short docstring explaining its purpose or logic. This includes constructors, properties, nested helpers, fixtures, and test functions. Update existing docstrings when behavior changes.
+- Always include concise inline comments explaining the important steps and decisions in new or modified code. Explain why the logic is needed, especially ownership checks, race guards, atomic Redis transitions, retries, timing units, cancellation, and cleanup ordering. Avoid merely restating obvious statements.
+- For Lua, Dockerfiles, and other formats without Python docstrings, use short comments above functions or logical blocks to explain their purpose, with inline comments for non-obvious logic.
+- Keep comments accurate, close to the relevant code, and consistent with the implementation. Before finishing, check that the classes and functions you touched are documented and that complex logic is understandable without referring to the conversation.
+
 ## Project context
 
 - This is a Python 3.14+ distributed task queue. FastAPI serves the API; Redis stores task state and coordinates workers. Use `uv` with `pyproject.toml` and `uv.lock` for dependencies and commands.
