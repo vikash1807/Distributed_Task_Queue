@@ -108,7 +108,8 @@ class TaskService:
         updates their canonical record and re-enqueues them to READY.
         """
 
-        failed_tasks: list[FailedTask] = self.dead_letter.drain_all()
+        failed_tasks: list[FailedTask] = await self.dead_letter.drain_all()
+        redriven = 0
 
         if not failed_tasks:
             return {
