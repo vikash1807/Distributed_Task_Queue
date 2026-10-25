@@ -1,376 +1,96 @@
 # Contributing
 
-Thanks for contributing to the Distributed Task Queue System.
+Contributions are welcome, including bug reports, documentation improvements,
+tests, and focused features.
 
-This project is being built incrementally, with a strong focus on understanding distributed-systems concepts and keeping the implementation modular, testable, and production-oriented.
+## Before you start
 
-Before making changes, please read the project [README](README.md) to understand the architecture and current functionality.
+1. Read the [README](README.md) for the product and quick start.
+2. Follow the [development guide](docs/develoment.md) to set up your environment.
+3. Read the [architecture guide](docs/architecture.md) before changing queue,
+   scheduling, worker, or persistence behavior.
+4. Follow the repository's [agent instructions](AGENTS.md) when using a coding agent.
 
----
+## Report a bug or propose a change
 
-## Development Setup
+For bugs, include the expected behavior, actual behavior, reproduction steps,
+relevant configuration, and useful logs. Remove passwords and sensitive payloads.
 
-### 1. Clone the repository
+For features, explain the problem, intended behavior, and how success can be
+verified. Discuss substantial API, storage, or deployment changes in an issue
+before starting implementation.
 
-```bash
-git clone https://github.com/vikash1807/Distributed_task_queue_system.git
-cd Distributed_task_queue_system
-```
+## Work on a focused branch
 
-### 2. Install dependencies
-
-The project uses `uv`.
-
-```bash
-uv sync
-```
-
-### 3. Start Redis
-
-Redis is required for running the application.
----
-
-# Development Workflow
-
-Create a branch for your work : follow belw defined conventions
+Create your branch from an up-to-date `main`:
 
 ```bash
-git checkout -b feat/<short-description>
+git switch main
+git pull --ff-only
+git switch -c feat/short-description
 ```
 
-Examples:
+Use a descriptive prefix such as `feat/`, `fix/`, `docs/`, or `test/`. Keep each
+pull request focused on one change or a closely related set of changes. Preserve
+unrelated work already present in your checkout.
+
+## Make the change
+
+- Follow the component boundaries and invariants in the architecture guide.
+- Add short docstrings to new or modified classes, functions, and methods.
+  Explain important decisions and non-obvious logic with inline comments.
+- Add tests for meaningful behavior and failure cases. Documentation-only changes
+  need relevant documentation checks rather than new application tests.
+- Update the appropriate document under `docs/` when behavior changes. Update
+  `.env.example` when settings change, and keep README focused on product use.
+- Keep formatting and unrelated cleanup out of the change unless needed for it.
+
+See the development guide for coding practices, dependency management, and safe
+Redis integration-test setup.
+
+## Validate your work
+
+Run these checks for code changes, replacing the example paths with your changed
+files:
 
 ```bash
-git checkout -b feat/node-heartbeat
-git checkout -b fix/retry-lease
-git checkout -b test/task-store
+uv run pytest -q
+uv run ruff check app/path/to/file.py tests/test_feature.py
+uv run ruff format --check app/path/to/file.py tests/test_feature.py
+git diff --check
 ```
 
-Keep changes focused on one feature, bug, or improvement.
+Redis integration suites skip unless dedicated test URLs are set. For Redis,
+lease, scheduling, or worker changes, run the relevant integration suites using
+the [disposable Redis setup](docs/develoment.md#redis-integration-tests).
+**Their fixtures call `FLUSHDB`; never point them at shared or application data.**
 
----
+For documentation changes, check relative links, examples, configuration names,
+and consistency with the implementation. Always run `git diff --check`.
 
-# Before Submitting Changes
+## Write useful commits
 
-Run the following checks before opening a pull request.
-
-## 1. Run Ruff linting
-
-```bash
-uv run ruff check <file_path>
-```
-to fix linting
-
-```bash
-uv run ruff check <file_path> --fix
-```
-
-The project currently enables checks including:
-
-* pycodestyle
-* Pyflakes
-* import sorting
-* bugbear
-* comprehensions
-* pyupgrade
-* unused arguments
-* simplify
-
-See `ruff.toml` for the complete configuration.
-
-## 2. Run Ruff formatter
-
-```bash
-uv run ruff format <file_path>
-```
-
-Check formatting without modifying files:
-
-```bash
-uv run ruff format <file_path> --check .
-```
----
-
-# Code Guidelines
-
-## Keep Responsibilities Separate
-
-Follow the existing project structure.
-
-For example:
-
-* `app/api/` — HTTP/API layer
-* `app/queue/` — queue and scheduling logic
-* `app/broker/` — task claiming, leases, acknowledgements
-* `app/store/` — Redis persistence
-* `app/worker/` — worker execution
-* `app/handler/` — task handlers
-* `app/model/` — domain models
-* `app/core/` — configuration and shared infrastructure
-
-Avoid putting business logic directly into API routes.
-
----
-
-## Prefer Async Code
-
-The application is built around `asyncio`.
-
-Use asynchronous APIs for Redis, HTTP, task execution, and other I/O-bound operations.
-
-Avoid blocking the event loop with synchronous I/O.
-
----
-
-## Preserve Atomicity
-
-When an operation modifies multiple pieces of shared Redis state, consider whether it needs to be atomic.
-
-For example, task claiming may involve:
+Use concise messages describing the result:
 
 ```text
-ready queue
-    ↓
-processing state
-    ↓
-lease
+feat(cron): add enabled-state updates
+fix(worker): preserve heartbeat during drain
+docs: explain local test setup
 ```
 
-Operations that must happen together should use the existing Redis/Lua approach rather than separate non-atomic commands.
+Prefer one logical change per commit. Reference the relevant issue; use a closing
+footer such as `Closes #123` only when the change resolves it.
 
----
+## Open a pull request
 
-## Handle Failures Explicitly
+Target `main` and include:
 
-Distributed systems must assume that processes, network connections, and tasks can fail.
+- The problem and resulting behavior.
+- The implementation decisions a reviewer needs to assess.
+- Commands run, results, and any skipped checks.
+- Relevant issue references and closing keywords.
+- Compatibility, configuration, or operational changes, if applicable.
 
-When adding functionality, consider:
-
-* worker crashes
-* Redis failures
-* task retries
-* expired leases
-* cancellation
-* partial failures
-
-Do not silently swallow exceptions.
-
-Use logging where failures require operational visibility.
-
----
-
-# Redis Changes
-
-If you introduce a new Redis key, set, sorted set, hash, or other structure:
-
-1. Document its purpose.
-2. Follow the existing `taskqueue:*` naming convention.
-3. Consider its lifecycle.
-4. Consider what happens when the process crashes.
-5. Consider whether the operation needs atomicity.
-
-Example naming style:
-
-```text
-taskqueue:task:{id}
-taskqueue:ready
-taskqueue:processing
-taskqueue:deadletter
-```
-
----
-
-# Lua Scripts
-
-Lua scripts are used when Redis operations need server-side atomicity.
-
-If modifying or adding a Lua script:
-
-* Keep the script focused.
-* Clearly document `KEYS` and `ARGV`.
-* Keep key ownership explicit.
-* Consider retry and failure behavior.
-
-Avoid moving atomic operations back into multiple client-side Redis commands without a strong reason.
-
----
-
-# API Changes
-
-When adding or changing an API endpoint:
-
-* Follow the existing router structure.
-* Validate request data.
-* Return appropriate HTTP status codes.
-* Use consistent error responses.
-* Keep service/business logic outside the route handler.
-
-Example existing API structure:
-
-```text
-/api/tasks
-/api/tasks/{task_id}
-/api/tasks/failed
-/api/tasks/failed/redrive
-/api/metrics
-/api/metrics/enhanced
-```
-
----
-
-# Commit Messages
-
-Keep commit messages short and descriptive.
-
-Examples:
-
-```text
-feat: add worker heartbeat
-fix: handle expired task lease
-test: add retry queue coverage
-refactor: simplify broker dependencies
-docs: update setup instructions
-chore: configure ruff
-```
-
-Prefer one logical change per commit.
-
----
-
-# Pull Requests
-
-Before opening a PR:
-
-```bash
-uv run ruff check <file_path>
-uv run ruff format --check <file_path>
-```
-
-The PR description should briefly explain:
-
-### What changed?
-
-Describe the implementation.
-
-### Why?
-
-Explain the problem or requirement being addressed.
-
-### How was it tested?
-
-For distributed behavior, include useful verification details.
-
-For example:
-
-```text
-Started two worker processes and verified both workers
-appeared independently in the node registry.
-
-Killed one worker and verified its heartbeat expired
-after the configured TTL.
-```
-
----
-
-# Keep PRs Focused
-
-Avoid combining unrelated changes.
-
-Prefer:
-
-```text
-PR: Add worker heartbeat
-```
-
-over:
-
-```text
-PR: Add heartbeat + refactor broker + rewrite tests + change API
-```
-
-If a refactor is required for a feature, keep it limited to what the feature needs.
-
----
-
-# Documentation
-
-Update documentation when behavior visible to developers or users changes.
-
-Examples:
-
-* New environment variables
-* New API endpoints
-* New task types
-* New Redis structures
-* New development commands
-* New architectural behavior
-
-Keep `README.md` focused on using and understanding the project.
-
-Keep implementation-specific discussion in code comments, issues, or PR descriptions.
-
----
-
-# Current Development Direction
-
-The project is being developed incrementally around distributed task-queue concepts.
-
-The general progression is:
-
-```text
-Task persistence
-        ↓
-Priority queues
-        ↓
-Atomic task claiming
-        ↓
-Worker execution
-        ↓
-Leases / visibility timeout
-        ↓
-Retries and backoff
-        ↓
-Dead-letter queue
-        ↓
-Delayed scheduling
-        ↓
-Metrics
-        ↓
-Task events / worker state
-        ↓
-Cluster membership / heartbeats
-        ↓
-Stale-node cleanup
-```
-
-When implementing a new feature, preserve the existing abstractions instead of bypassing them.
-
----
-
-# Questions and Issues
-
-If you find a bug or have an architectural question, open a GitHub issue with:
-
-* A short description
-* Expected behavior
-* Actual behavior
-* Steps to reproduce
-* Relevant logs/errors
-* Redis state or task state when applicable
-
-For feature proposals, explain the problem first and then the proposed solution.
-
----
-
-# Final Checklist
-
-Before submitting a contribution:
-
-* [ ] Code follows the existing project structure.
-* [ ] New behavior has appropriate tests.
-* [ ] `uv run ruff check <file_path>` passes.
-* [ ] `uv run ruff format <file_path> --check .` passes.
-* [ ] No unnecessary changes are included.
-* [ ] Redis operations preserve required atomicity.
-* [ ] Failure and shutdown behavior has been considered.
-* [ ] Commit messages clearly describe the changes.
+Before requesting review, confirm that the diff contains only intended changes,
+checks have passed, documentation is current, and no credentials or local
+artifacts are included. Respond to feedback with focused follow-up commits.
